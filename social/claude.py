@@ -42,7 +42,7 @@ class Claude:
         return month
 
     def generate(self, model, system, prompt, max_tokens):
-        month = self.check_limit()
+        self.check_limit()
         input_rate, output_rate = RATES[model]
         body = json.dumps(
             {
@@ -62,11 +62,15 @@ class Claude:
             raise ValueError("Unsupported Claude request size")
         reserved_tokens = input_bound + max_tokens
         reserved_cost = input_bound * input_rate + max_tokens * output_rate
-        used = self.months.get(month, 0)
-        if self.tokens + reserved_tokens > self.token_limit or used + reserved_cost > self.month_limit:
-            raise RunLimit("Claude request exceeds remaining budget")
+        if self.tokens + reserved_tokens > self.token_limit:
+            raise RunLimit("Claude request exceeds remaining token budget")
 
         key = secret("ANTHROPIC_API_KEY")
+        # A Keychain unlock prompt can span midnight. Reserve against the dispatch month.
+        month = self.check_limit()
+        used = self.months.get(month, 0)
+        if used + reserved_cost > self.month_limit:
+            raise RunLimit("Claude request exceeds remaining monthly budget")
         headers = {"x-api-key": key, "anthropic-version": "2026-10-21", "Content-Type": "application/json"}
         self.tokens += reserved_tokens
         self.months[month] = used + reserved_cost

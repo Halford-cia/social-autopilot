@@ -107,3 +107,15 @@ class ClaudeContract(unittest.TestCase):
             self.send.return_value = malformed
             with self.assertRaises(RunLimit):
                 self.client.generate(SONNET, "role", "q", 100)
+
+    def test_unlock_spanning_midnight_charges_the_month_of_dispatch(self):
+        clock = Mock(return_value=NOW)
+
+        def unlock(*_, **kwargs):
+            clock.return_value = datetime(2026, 12, 1, tzinfo=UTC)
+            return Mock(returncode=0, stdout="fixture")
+
+        self.keys.side_effect = unlock
+        client = Claude(CONFIG, self.store, send=self.send, clock=clock)
+        client.generate(SONNET, "role", "p", 100)
+        self.assertEqual(self.store.data["anthropicSpendNanoUsd"], {"2026-12": 140000})
