@@ -102,3 +102,24 @@ class AuthoringPath(unittest.TestCase):
         ):
             self.assertEqual(cli.main(), 1)
             tick.assert_not_called()
+
+    def test_photo_failure_does_not_buy_the_same_week_twice(self):
+        now = datetime(2026, 11, 30, tzinfo=CT)
+        self.writer.generate.side_effect = cli.DemoWriter().generate
+        picker = Mock(side_effect=OSError("mock interrupted upload"))
+        with patch("social.runtime.check"), patch("social.runtime.media_picker", return_value=picker):
+            with self.assertRaises(OSError):
+                weekly("eden", self.cfg, self.store, now, self.api, self.issues, self.writer)
+            picker.side_effect = None
+            picker.return_value = None
+            weekly("eden", self.cfg, self.store, now, self.api, self.issues, self.writer)
+        self.writer.generate.assert_called_once()
+
+    def test_revalidate_saved_copy_before_opening_external_preview(self):
+        now = datetime(2026, 11, 30, tzinfo=CT)
+        batch = plan("eden", now.date(), lambda _: None, self.cfg["brands"]["eden"]["targets"])
+        batch["days"][0]["text"] = "Unreviewed placeholder"
+        self.store.data["batches"]["eden/2026-11-30"] = {"batch": batch}
+        with patch("social.runtime.check"), self.assertRaises(ValueError):
+            weekly("eden", self.cfg, self.store, now, self.api, self.issues, self.writer)
+        self.issues.ensure.assert_not_called()

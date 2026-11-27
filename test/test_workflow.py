@@ -72,4 +72,18 @@ class Workflow(unittest.TestCase):
             self.run_batch([self.manual], sink=timeout)
         self.run_batch([self.manual])
         self.assertEqual(len(self.calls), 14)
-        self.assertFalse(self.state["approvals"].get("eden"))
+        self.assertEqual(self.state["approvals"]["eden"], [self.batch["week"]])
+
+    def test_two_approved_weeks_count_even_if_first_slots_have_passed(self):
+        def send(body):
+            return {"postSubmissionId": "test", "scheduledTime": body["scheduledTime"]}
+
+        for day in (date(2026, 11, 30), date(2026, 12, 7)):
+            batch = plan("eden", day, lambda _: None, TARGETS)
+            manual = [{"user": {"id": 123}, "body": "/approve " + identity(batch)}]
+            late = datetime.fromisoformat(batch["days"][1]["time"])
+            publish(batch, self.state, lambda: None, late, False, 123, preview(batch), manual, send)
+        self.assertEqual(self.state["approvals"]["eden"], ["2026-11-30", "2026-12-07"])
+        third = plan("eden", date(2026, 12, 14), lambda _: None, TARGETS)
+        publish(third, self.state, lambda: None, NOW, True, 123, preview(third), [], send)
+        self.assertIn("eden/2026-12-14/facebook", self.state["writes"])

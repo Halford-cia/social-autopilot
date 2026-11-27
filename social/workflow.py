@@ -37,12 +37,14 @@ def publish(batch, state, save, now, auto, owner, issue_body, comments, send, cl
     prior = set(w for w in state["approvals"].get(brand, []) if w < week)
     if preview(batch) != issue_body or not (approved or (auto is True and len(prior) >= 2)):
         return
+    if approved and week not in state["approvals"].get(brand, []):
+        # Hank approves a batch. Delivery failures and expired slots have their own ledger.
+        state["approvals"][brand] = sorted([*state["approvals"].get(brand, []), week])
+        save()
     writes = state["writes"]
-    keys = []
     for day in batch["days"]:
         for platform in day["platforms"]:
             key = "/".join((brand, day["time"][:10], platform))
-            keys.append(key)
             if key in writes:
                 continue
             due = datetime.fromisoformat(day["time"])
@@ -66,9 +68,3 @@ def publish(batch, state, save, now, auto, owner, issue_body, comments, send, cl
                 if result.get("scheduledTime") and datetime.fromisoformat(result["scheduledTime"]) == due:
                     writes[key]["status"] = "accepted"
             save()
-    if approved and all(
-        writes[k]["status"] in ("accepted", "scheduled", "published") and writes[k].get("batch") == token
-        for k in keys
-    ):
-        state["approvals"][brand] = sorted(set(state["approvals"].get(brand, [])) | {week})
-        save()

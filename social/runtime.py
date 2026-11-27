@@ -11,7 +11,7 @@ from .claude import RunLimit, validate_limits
 from .digest import bounds, digest
 from .inbox import route
 from .media import media_picker
-from .planner import BRANDS, CT, caption, plan, preview
+from .planner import BRANDS, CT, caption, plan, preview, verify_copy
 from .sources import check
 from .workflow import publish
 from .writing import reply_text, write_week
@@ -288,20 +288,28 @@ def weekly(brand, cfg, store, now, api, issues, writer):
     check(brand, cfg, live=True)
     record_key = brand + "/" + start.isoformat()
     records = store.data["batches"]
-    if record_key not in records:
+    draft = records.get(record_key, {})
+    if "batch" not in draft:
+
+        def compose(brand, week, cards):
+            if "captions" not in draft:
+                draft["captions"] = write_week(brand, week, cards, writer)
+                records[record_key] = draft
+                store.save()
+            return draft["captions"]
+
         pick = media_picker(brand, cfg, api, secret("COMPANYCAM_API_KEY") if brand == "acacia" else None)
-        batch = plan(
-            brand, start, pick, targets, compose=lambda b, w, cards: write_week(b, w, cards, writer)
-        )
+        batch = plan(brand, start, pick, targets, compose=compose)
         records[record_key] = {"batch": batch}
         store.save()
     # On Sunday an approval for the outgoing week's remaining slots also counts.
     for week in dict.fromkeys([monday, start]):
         record = records.get(brand + "/" + week.isoformat())
-        if not record:
+        if not record or "batch" not in record:
             continue
         batch = record["batch"]
-        if batch["targets"] != targets:
+        verify_copy(batch)
+        if batch["brand"] != brand or batch["week"] != week.isoformat() or batch["targets"] != targets:
             raise ValueError("Pending batch destinations changed; review original batch")
         check(
             brand,
