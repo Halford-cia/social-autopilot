@@ -26,7 +26,7 @@ class FacebookPages(unittest.TestCase):
             issues.ensure.return_value = 3
             api.get.side_effect = lambda path, **params: {"items": [item] if path == "/messages" else []}
             process_inbox(
-                "eden", {"facebook": {"accountId": "parent", "pageId": "page"}}, store, now, api, issues
+                "eden", {"facebook": {"accountId": "parent", "pageId": "page"}}, store, now, api, issues, Mock()
             )
             issues.ensure.assert_called_once()
             api.post.assert_not_called()
@@ -62,6 +62,6 @@ class FacebookPages(unittest.TestCase):
 
             api.get.side_effect = get
             process_inbox(
-                "eden", {"facebook": {"accountId": "parent", "pageId": "eden-page"}}, store, now, api, issues
+                "eden", {"facebook": {"accountId": "parent", "pageId": "eden-page"}}, store, now, api, issues, Mock()
             )
             api.post.assert_not_called()

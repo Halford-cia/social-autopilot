@@ -11,6 +11,7 @@ def bounds(week):
 def digest(brand, week, targets, rows):
     start, end = bounds(week)
     measured, total, excluded = [], 0, set()
+    follows = []
     seen = set()
     for row in rows:
         platform, account, state = row["platform"], row.get("account") or {}, row["state"]
@@ -27,6 +28,9 @@ def digest(brand, week, targets, rows):
             continue
         total += 1
         snapshot = ((state.get("analytics") or {}).get("latest") or {}).get("metrics") or {}
+        count = snapshot.get("followsCount")
+        if isinstance(count, (str, int)) and str(count).isdecimal():
+            follows.append(int(count))
         reach = snapshot.get("reachCount")
         if isinstance(reach, (str, int)) and str(reach).isdecimal():
             measured.append((int(reach), platform, row["id"], row["postTime"][:10]))
@@ -36,6 +40,7 @@ def digest(brand, week, targets, rows):
         f"## {BRANDS[brand]} · {week} through {(end.date() - timedelta(days=1)).isoformat()}",
         "",
         f"Sum of post reach: {label} ({len(measured)}/{total} IG/FB posts measured). Audiences may overlap.",
+        f"Post-attributed follows: {sum(follows) if follows else 'unavailable'} ({len(follows)}/{total} IG/FB posts measured).",
         "Follower change: unavailable. Blotato's documented IG/FB analytics expose no account follower history.",
         "",
         "**Top posts by reported reach**",

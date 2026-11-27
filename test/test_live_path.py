@@ -9,7 +9,7 @@ from unittest.mock import Mock, patch
 
 from PIL import Image
 
-from social.cli import load_example
+from social.cli import DemoWriter, load_example
 from social.media import FLAGS, candidate_url, sanitize
 from social.planner import CT, identity
 from social.runtime import State, process_inbox, tick_brand
@@ -62,7 +62,7 @@ class LivePath(unittest.TestCase):
                 patch("social.runtime.media_picker", return_value=lambda _: "https://example.org/safe.jpg"),
             ):
                 issues.read.return_value = ("", [])
-                tick_brand("eden", cfg, store, now, api, issues)
+                tick_brand("eden", cfg, store, now, api, issues, DemoWriter())
                 api.post.assert_not_called()
                 record = next(iter(store.data["batches"].values()))
                 from social.planner import preview
@@ -72,8 +72,8 @@ class LivePath(unittest.TestCase):
                     preview(record["batch"]),
                     [{"user": {"id": cfg["approverId"]}, "body": cmd}],
                 )
-                tick_brand("eden", cfg, store, now, api, issues)
-                tick_brand("eden", cfg, store, now, api, issues)
+                tick_brand("eden", cfg, store, now, api, issues, DemoWriter())
+                tick_brand("eden", cfg, store, now, api, issues, DemoWriter())
                 self.assertEqual(api.post.call_count, 14)
 
     def test_handoff_persists_for_followup_in_same_dm_thread(self):
@@ -98,8 +98,8 @@ class LivePath(unittest.TestCase):
 
             msg = message("first", "Refund?", now)
             api.get.side_effect = lambda path, **params: {"items": [msg] if path == "/messages" else []}
-            process_inbox("eden", {"instagram": {"accountId": "a"}}, store, now, api, issues)
+            process_inbox("eden", {"instagram": {"accountId": "a"}}, store, now, api, issues, Mock())
             now += timedelta(minutes=15)
             msg = message("second", "How do I book?", now)
-            process_inbox("eden", {"instagram": {"accountId": "a"}}, store, now, api, issues)
+            process_inbox("eden", {"instagram": {"accountId": "a"}}, store, now, api, issues, Mock())
             api.post.assert_not_called()

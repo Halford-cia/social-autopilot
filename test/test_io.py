@@ -83,8 +83,8 @@ class Operational(unittest.TestCase):
                 parentCommentId=None,
             )
             api.get.side_effect = lambda path, **params: {"items": [row] if path == "/comments" else []}
-            process_inbox("eden", {"instagram": {"accountId": "a"}}, store, now, api, issues)
-            process_inbox("eden", {"instagram": {"accountId": "a"}}, store, now, api, issues)
+            process_inbox("eden", {"instagram": {"accountId": "a"}}, store, now, api, issues, Mock())
+            process_inbox("eden", {"instagram": {"accountId": "a"}}, store, now, api, issues, Mock())
             self.assertEqual(issues.ensure.call_count, 1)
             api.post.assert_not_called()
             self.assertNotIn(row["text"], str(issues.ensure.call_args))

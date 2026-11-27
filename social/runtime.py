@@ -6,13 +6,15 @@ import subprocess
 from datetime import datetime, timedelta
 from urllib.parse import quote
 
-from .api import pages, secret
+from .api import RemoteError, pages, secret
+from .claude import RunLimit, validate_limits
 from .digest import bounds, digest
 from .inbox import route
 from .media import media_picker
 from .planner import BRANDS, CT, caption, plan, preview
 from .sources import check
 from .workflow import publish
+from .writing import reply_text, write_week
 
 
 class State:
@@ -62,6 +64,7 @@ class State:
 
 
 def validate_config(cfg):
+    validate_limits(cfg["claude"])
     owners = cfg["approverId"]
     if type(owners) is not int or owners < 1:
         raise ValueError("Set the GitHub numeric ID of the approver")
@@ -109,7 +112,7 @@ def notice(issues, title, message):
     return issues.ensure("Social · " + title, message)
 
 
-def process_inbox(brand, targets, store, now, api, issues):
+def process_inbox(brand, targets, store, now, api, issues, writer):
     state = store.data
     if brand not in state["inboxSince"]:
         state["inboxSince"][brand] = now.isoformat()
@@ -204,6 +207,15 @@ def process_inbox(brand, targets, store, now, api, issues):
                     thread = groups.get(item.get("conversationId"), [])
                     if not item.get("conversationId") or len(thread) != 1:
                         action, payload = "human", None
+                if action == "send":
+                    try:
+                        text = reply_text(writer, payload["text"])
+                    except (RemoteError, ValueError):
+                        text = None
+                    if text is None:
+                        action, payload = "human", None
+                    else:
+                        payload["text"] = text
                 record = {"brand": brand, "kind": kind, "platform": platform, "time": item["createdAt"]}
                 if action in ("human", "draft"):
                     body = (
@@ -265,7 +277,7 @@ def audit_delivery(brand, store, now, api, issues):
             store.save()
 
 
-def weekly(brand, cfg, store, now, api, issues):
+def weekly(brand, cfg, store, now, api, issues, writer):
     local = now.astimezone(CT).date()
     monday = local - timedelta(days=local.weekday())
     existing = brand + "/" + monday.isoformat() in store.data["batches"]
@@ -278,7 +290,9 @@ def weekly(brand, cfg, store, now, api, issues):
     records = store.data["batches"]
     if record_key not in records:
         pick = media_picker(brand, cfg, api, secret("COMPANYCAM_API_KEY") if brand == "acacia" else None)
-        batch = plan(brand, start, pick, targets)
+        batch = plan(
+            brand, start, pick, targets, compose=lambda b, w, cards: write_week(b, w, cards, writer)
+        )
         records[record_key] = {"batch": batch}
         store.save()
     # On Sunday an approval for the outgoing week's remaining slots also counts.
@@ -290,7 +304,10 @@ def weekly(brand, cfg, store, now, api, issues):
         if batch["targets"] != targets:
             raise ValueError("Pending batch destinations changed; review original batch")
         check(
-            brand, cfg, [caption(brand, day, p) for day in batch["days"] for p in day["platforms"]], live=True
+            brand,
+            cfg,
+            [caption(brand, day, p) for day in batch["days"] for p in day["platforms"]],
+            live=True,
         )
         body = preview(batch)
         if "issue" not in record:
@@ -329,24 +346,26 @@ def monday_digest(brand, targets, store, now, api, issues):
         store.save()
 
 
-def tick_brand(brand, cfg, store, now, api, issues):
+def tick_brand(brand, cfg, store, now, api, issues, writer):
     targets = cfg["brands"][brand]["targets"]
     check_destinations(brand, cfg, api)
 
     def inbox():
         check(brand, cfg, live=True)
-        process_inbox(brand, targets, store, now, api, issues)
+        process_inbox(brand, targets, store, now, api, issues, writer)
 
     stages = {
         "inbox": inbox,
         "digest": lambda: monday_digest(brand, targets, store, now, api, issues),
-        "weekly": lambda: weekly(brand, cfg, store, now, api, issues),
+        "weekly": lambda: weekly(brand, cfg, store, now, api, issues, writer),
         "delivery": lambda: audit_delivery(brand, store, now, api, issues),
     }
     failed = []
     for stage, run in stages.items():
         try:
             run()
+        except RunLimit:
+            raise
         except (RuntimeError, ValueError, KeyError, subprocess.SubprocessError) as exc:
             failed.append(stage)
             notice(

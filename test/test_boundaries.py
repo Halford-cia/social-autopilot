@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from social.cli import load_example
+from social.cli import DemoWriter, load_example
 from social.media import company_photos
 from social.planner import CT, identity, plan
 from social.runtime import State, tick_brand
@@ -25,7 +25,7 @@ class Boundaries(unittest.TestCase):
                 patch("social.runtime.check"),
                 patch("social.runtime.media_picker", return_value=lambda _: None),
             ):
-                tick_brand("eden", cfg, store, now, api, issues)
+                tick_brand("eden", cfg, store, now, api, issues, DemoWriter())
             week = next(iter(store.data["batches"].values()))["batch"]["week"]
             self.assertEqual(week, (now.date() + timedelta(days=3)).isoformat())
 
@@ -42,7 +42,7 @@ class Boundaries(unittest.TestCase):
                 patch("social.runtime.media_picker", side_effect=RuntimeError("media unavailable")),
             ):
                 with self.assertRaises(RuntimeError):
-                    tick_brand("eden", cfg, store, now, api, issues)
+                    tick_brand("eden", cfg, store, now, api, issues, DemoWriter())
             self.assertTrue(store.data["digests"])
 
     def test_companycam_tag_prefilter_never_replaces_exact_photo_tags(self):

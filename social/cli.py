@@ -6,9 +6,11 @@ from datetime import date, datetime
 from pathlib import Path
 
 from .api import Blotato, secret
+from .claude import Claude, RunLimit
 from .issues import Issues
 from .planner import BRANDS, CT, plan, preview
 from .runtime import State, tick_brand, validate_config
+from .writing import write_week
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = Path.home() / "Library/Application Support/social-autopilot"
@@ -17,6 +19,21 @@ CONFIG = DATA / "config.json"
 
 def load_example():
     return json.loads((ROOT / "config.example.json").read_text())
+
+
+class DemoWriter:
+    """Simulated Claude output, used only by the demo and offline tests."""
+
+    def generate(self, model, system, prompt, max_tokens):
+        brief = json.loads(prompt)
+        captions = []
+        for i, day in enumerate(brief["days"]):
+            terms = day["topics"]
+            pattern = brief["patterns"][i % len(brief["patterns"])]
+            hook = pattern.format(a=terms[0], b=terms[-1])
+            parts = (hook, day["fact"]) if i % 2 == 0 else (day["fact"], hook)
+            captions.append(" ".join(parts))
+        return json.dumps(captions)
 
 
 def demo(start):
@@ -29,6 +46,7 @@ def demo(start):
             lambda _, brand=brand, images=images: (
                 f"https://media.example.invalid/mock-{brand}-{next(images)}.jpg"
             ),
+            compose=lambda b, w, cards: write_week(b, w, cards, DemoWriter()),
         )
         blocks.append(preview(batch))
     return "\n\n".join(blocks)
@@ -64,22 +82,30 @@ def main():
         return 0
     cfg = json.loads(args.config.expanduser().read_text())
     validate_config(cfg)
-    api = Blotato(secret("BLOTATO_API_KEY"))
-    issues = Issues(cfg["operationsRepo"])
-    if issues.actor == cfg["approverId"]:
-        raise ValueError("Use a distinct bot identity for the Mini")
-    failed = False
     with State(DATA / "ledger") as store:
-        for brand in BRANDS:
-            try:
-                tick_brand(brand, cfg, store, datetime.now(CT), api, issues)
-            except Exception as exc:
-                failed = True
-                # Transport failures may carry signed URLs or private data. Only emit class/status.
-                print(
-                    f"{brand}: cycle incomplete ({type(exc).__name__}, HTTP {getattr(exc, 'status', 0)}).",
-                    file=sys.stderr,
-                )
+        writer = Claude(cfg["claude"], store)
+        try:
+            writer.check_limit()
+            api = Blotato(secret("BLOTATO_API_KEY"))
+            issues = Issues(cfg["operationsRepo"])
+            if issues.actor == cfg["approverId"]:
+                raise ValueError("Use a distinct bot identity for the Mini")
+            failed = False
+            for brand in BRANDS:
+                writer.check_limit()
+                try:
+                    tick_brand(brand, cfg, store, datetime.now(CT), api, issues, writer)
+                except RunLimit:
+                    raise
+                except Exception as exc:
+                    failed = True
+                    print(
+                        f"{brand}: cycle incomplete ({type(exc).__name__}, HTTP {getattr(exc, 'status', 0)}).",
+                        file=sys.stderr,
+                    )
+        except RunLimit as exc:
+            print(f"Cycle stopped: {exc}.", file=sys.stderr)
+            return 1
     return int(failed)
 
 
@@ -89,5 +115,7 @@ if __name__ == "__main__":
     except BlockingIOError:
         sys.exit(0)  # another tick holds the lock
     except Exception as exc:
-        print(f"Cycle unavailable ({type(exc).__name__}). Check setup and the local ledger.", file=sys.stderr)
+        print(
+            f"Cycle unavailable ({type(exc).__name__}). Check setup and the local ledger.", file=sys.stderr
+        )
         sys.exit(1)

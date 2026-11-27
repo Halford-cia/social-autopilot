@@ -38,7 +38,9 @@ class Inbox(unittest.TestCase):
         self.assertEqual(body["recipientId"], "guest")
         for changes in [dict(payload={"selection": {}}), dict(recipientId="wrong"), dict(text="Refund?")]:
             self.assertNotEqual(route("eden", "messages", msg | changes, TARGET, NOW)[0], "send")
-        self.assertEqual(route("eden", "messages", msg | {"direction": "outgoing"}, TARGET, NOW)[0], "ignore")
+        self.assertEqual(
+            route("eden", "messages", msg | {"direction": "outgoing"}, TARGET, NOW)[0], "ignore"
+        )
 
     def test_no_reply_to_nested_comments_or_other_account(self):
         c = dict(
@@ -82,3 +84,22 @@ class Digest(unittest.TestCase):
         for term in ["20", "2/3", "unavailable", "one", "next"]:
             self.assertIn(term, report.lower())
         self.assertNotIn("foreign", report)
+
+    def test_post_attributed_follows_report_coverage_separately_from_net_change(self):
+        def post(pid, metrics):
+            return {
+                "id": pid,
+                "platform": "instagram",
+                "account": {"id": "ig"},
+                "postTime": "2026-11-24T15:00:00Z",
+                "state": {"type": "published", "analytics": {"latest": {"metrics": metrics}}},
+            }
+
+        report = digest(
+            "eden",
+            "2026-11-23",
+            {"instagram": {"accountId": "ig"}},
+            [post("one", {"followsCount": "6"}), post("two", {"followsCount": "0"}), post("three", {})],
+        )
+        self.assertIn("Post-attributed follows: 6 (2/3", report)
+        self.assertIn("Follower change: unavailable", report)

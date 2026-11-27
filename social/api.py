@@ -35,7 +35,7 @@ def request(method, url, headers=None, data=None, *, raw=False):
 
 
 def secret(name):
-    if value := os.environ.get(name):
+    if name != "ANTHROPIC_API_KEY" and (value := os.environ.get(name)):
         return value
     result = subprocess.run(
         ["/usr/bin/security", "find-generic-password", "-s", "social-autopilot/" + name, "-w"],

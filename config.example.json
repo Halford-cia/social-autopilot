@@ -33,5 +33,9 @@
         }
       }
     }
+  },
+  "claude": {
+    "monthlySpendLimitCents": 1000,
+    "maxTokensPerRun": 16000
   }
 }

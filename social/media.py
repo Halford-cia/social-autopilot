@@ -1,9 +1,11 @@
 """Only sanitized, visually cleared pixels leave the Mini."""
 
-import base64
 import json
+import subprocess
+import tempfile
 import warnings
 from io import BytesIO
+from pathlib import Path
 from urllib.parse import urlencode, urlsplit
 
 from PIL import Image, ImageOps
@@ -88,20 +90,48 @@ def visual_check(jpeg, brand):
         "house exterior, address, location landmark, or neighboring property. Return these boolean fields: "
         + ", ".join(FLAGS)
     )
-    payload = dict(
-        model="gemma3:4b",
-        stream=False,
-        options={"temperature": 0},
-        format=dict(type="object", properties={k: {"type": "boolean"} for k in FLAGS}, required=list(FLAGS)),
-        messages=[dict(role="user", content=prompt, images=[base64.b64encode(jpeg).decode()])],
-    )
-    answer = request(
-        "POST",
-        "http://127.0.0.1:11434/api/chat",
-        {"Content-Type": "application/json"},
-        json.dumps(payload).encode(),
-    )
-    return json.loads(answer["message"]["content"])
+    models = Path.home() / "Library/Application Support/social-autopilot/vision"
+    schema = {
+        "type": "object",
+        "properties": {k: {"type": "boolean"} for k in FLAGS},
+        "required": list(FLAGS),
+        "additionalProperties": False,
+    }
+    try:
+        # Inspect the pixels on the Mini. Discard diagnostics, which can describe the image.
+        with tempfile.NamedTemporaryFile(suffix=".jpg") as photo:
+            photo.write(jpeg)
+            photo.flush()
+            result = subprocess.run(
+                [
+                    "llama-mtmd-cli",
+                    "-m",
+                    str(models / "gemma-3-4b-it-Q4_K_M.gguf"),
+                    "--mmproj",
+                    str(models / "mmproj-model-f16.gguf"),
+                    "--image",
+                    photo.name,
+                    "-p",
+                    prompt,
+                    "--json-schema",
+                    json.dumps(schema),
+                    "--temp",
+                    "0",
+                    "-n",
+                    "160",
+                    "--verbosity",
+                    "0",
+                ],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                env={"PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin", "HOME": str(Path.home())},
+                timeout=180,
+                check=True,
+            )
+            return json.loads(result.stdout)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
 
 
 def sanitize(data, brand, inspect=visual_check):
