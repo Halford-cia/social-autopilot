@@ -73,6 +73,9 @@ class LivePath(unittest.TestCase):
                     },
                 ),
                 patch("social.runtime.recheck_repo", return_value="ok") as recheck,
+                patch("social.runtime.refresh_repo") as refresh,
+                # Each later cycle would submit only near its slot; here every slot is in reach.
+                patch("social.workflow.SUBMIT_AHEAD", timedelta(days=30)),
             ):
                 issues.read.return_value = ("", [])
                 tick_brand("eden", cfg, store, now, api, issues, DemoWriter())
@@ -89,6 +92,7 @@ class LivePath(unittest.TestCase):
                 tick_brand("eden", cfg, store, now, api, issues, DemoWriter())
                 self.assertEqual(api.post.call_count, 14)
                 self.assertEqual(recheck.call_count, 7)  # once per photo day, before its submissions
+                refresh.assert_called()  # upstream is fetched before any photo is cleared
                 self.assertIn("“@stayeden”", preview(record["batch"]))
 
     def test_handoff_persists_for_followup_in_same_dm_thread(self):
@@ -101,7 +105,7 @@ class LivePath(unittest.TestCase):
                 # A reply that passes validation, so only the open handoff can stop the send.
                 writer.generate.return_value = "Happy to help! " + BOOKING
                 api.post.return_value = {"id": "sent"}
-                store.data["inboxSince"]["eden"] = (now - timedelta(minutes=15)).isoformat()
+                store.data["inboxSince"]["eden/instagram"] = (now - timedelta(minutes=15)).isoformat()
 
                 def message(mid, text, stamp):
                     return dict(

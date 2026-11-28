@@ -14,6 +14,8 @@ from social.inbox import BOOKING
 from social.planner import CT, plan
 from social.runtime import State, process_inbox, tick_brand, weekly
 
+IG = {"accountId": "<eden-instagram>", "name": "@stayeden"}  # a resolved destination (449r2 P0-1)
+
 
 class AuthoringPath(unittest.TestCase):
     def setUp(self):
@@ -62,7 +64,7 @@ class AuthoringPath(unittest.TestCase):
         self.api.post.return_value = {"id": "accepted"}
         self.writer.generate.side_effect = ["Happy to help! " + BOOKING, "We confirm your dates."]
         for brand in ("eden", "acacia"):
-            self.store.data["inboxSince"][brand] = (now - timedelta(hours=1)).isoformat()
+            self.store.data["inboxSince"][brand + "/instagram"] = (now - timedelta(hours=1)).isoformat()
             process_inbox(brand, targets, self.store, now, self.api, self.issues, self.writer, self.cfg["blotato"])
         self.assertEqual(self.writer.generate.call_count, 2)
         for call in self.writer.generate.call_args_list:
@@ -74,8 +76,8 @@ class AuthoringPath(unittest.TestCase):
 
     def test_limit_escapes_stage_handler(self):
         with (
-            patch("social.runtime.check_destinations", return_value=({"instagram": "@stayeden"}, [])),
-            patch.dict(self.store.data, {"approvedDestinations": {"eden": {"instagram": "@stayeden"}}}),
+            patch("social.runtime.check_destinations", return_value=({"instagram": IG}, [])),
+            patch.dict(self.store.data, {"approvedDestinations": {"eden": {"instagram": IG}}}),
             patch("social.runtime.check"),
             patch("social.runtime.process_inbox", side_effect=RunLimit("monthly limit")),
             patch("social.runtime.monday_digest") as digest,

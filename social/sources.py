@@ -33,6 +33,26 @@ def git_bytes(repo, path, *, missing_ok=False):
     return subprocess.run([*git, "show", "origin/main:" + path], check=True, **quiet).stdout
 
 
+def refresh_repo(repo):
+    """Fetch upstream main into origin/main. Raises (CalledProcessError or timeout) when it cannot."""
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(Path(repo).expanduser()),
+            "fetch",
+            "--quiet",
+            "--no-tags",
+            "origin",
+            "+refs/heads/main:refs/remotes/origin/main",
+        ],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        timeout=120,
+    )
+
+
 def check_remote_blob(path, data):
     endpoint = "repos/Halford-cia/acacia-roofing-systems/contents/" + path + "?ref=main"
     head = subprocess.check_output(

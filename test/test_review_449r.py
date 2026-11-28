@@ -27,6 +27,19 @@ CLEAR = dict.fromkeys(FLAGS, False)
 BUDGET = {"contactChargeLimitCents": 100, "contactChargeCents": 2, "billingPeriodDay": 1}
 TARGETS = {"instagram": {"accountId": "ig"}, "facebook": {"accountId": "fb", "pageId": "page"}}
 NAMES = {"instagram": "@stayeden_fredericksburgtx", "facebook": "Stay Eden"}
+# What check_destinations resolves: the configured IDs plus the name Blotato reports (449r2 P0-1).
+DESTS = {p: dict(TARGETS[p], name=n) for p, n in NAMES.items()}
+# Unit tests of other guards put every slot inside the submission window (449r2 P0-4).
+FAR = timedelta(days=30)
+
+
+def renamed(platform, name):
+    return DESTS | {platform: dict(DESTS[platform], name=name)}
+
+
+def conversation_get(started, cid="thread"):
+    """Conversation metadata for a DM thread Blotato reports as started at `started` (449r2 P0-2)."""
+    return {"id": cid, "accountId": "a", "platform": "instagram", "createdAt": started.isoformat()}
 
 
 def valid_writer():
@@ -80,7 +93,7 @@ class EditedApproval(unittest.TestCase):
     """P0-2: only a fresh, unedited comment by Hank approves."""
 
     def setUp(self):
-        self.batch = plan("eden", date(2026, 11, 30), lambda _: None, TARGETS)
+        self.batch = plan("eden", date(2026, 11, 30), lambda _: None, TARGETS, destinations=DESTS)
         self.state = {"approvals": {}, "writes": {}}
         self.sent = []
 
@@ -95,6 +108,8 @@ class EditedApproval(unittest.TestCase):
             preview(self.batch),
             [comment],
             lambda body: self.sent.append(body) or {"postSubmissionId": "x"},
+            current=DESTS,
+            ahead=FAR,
         )
 
     def test_edited_or_unknown_edit_state_never_approves(self):
@@ -185,10 +200,10 @@ class DestinationIdentity(unittest.TestCase):
         self.assertNotIn("instagram", resolved)
         self.assertEqual([p for p, _ in problems], ["instagram"])
         resolved, problems = check_destinations("eden", eden_cfg(), accounts_api())
-        self.assertEqual((resolved, problems), (NAMES, []))
+        self.assertEqual((resolved, problems), (DESTS, []))
 
     def test_preview_and_token_show_the_resolved_destinations(self):
-        batch = plan("eden", date(2026, 11, 30), lambda _: None, TARGETS, destinations=NAMES)
+        batch = plan("eden", date(2026, 11, 30), lambda _: None, TARGETS, destinations=DESTS)
         text = preview(batch)
         self.assertIn("@stayeden_fredericksburgtx", text)
         self.assertIn("Stay Eden", text)
@@ -197,7 +212,7 @@ class DestinationIdentity(unittest.TestCase):
             date(2026, 11, 30),
             lambda _: None,
             TARGETS,
-            destinations=NAMES | {"facebook": "Acacia Roofing"},
+            destinations=renamed("facebook", "Acacia Roofing"),
         )
         self.assertNotEqual(identity(batch), identity(swapped))
 
@@ -214,12 +229,13 @@ class DestinationIdentity(unittest.TestCase):
                 tick_brand("eden", eden_cfg(), store, now, api, issues, valid_writer())
                 inbox_reads = [c for c in api.get.call_args_list if c.args[0] in ("/messages", "/comments")]
                 self.assertEqual(inbox_reads, [])
-                self.assertNotIn("eden", store.data["inboxSince"])
-                store.data["approvedDestinations"] = {"eden": dict(NAMES)}
+                self.assertEqual(store.data["inboxSince"], {})
+                store.data["approvedDestinations"] = {"eden": dict(DESTS)}
                 tick_brand("eden", eden_cfg(), store, now, api, issues, valid_writer())
-                self.assertIn("eden", store.data["inboxSince"])
+                self.assertIn("eden/instagram", store.data["inboxSince"])
+                self.assertIn("eden/facebook", store.data["inboxSince"])
                 # A destination renamed or swapped since the approval pauses the inbox again.
-                store.data["approvedDestinations"] = {"eden": NAMES | {"facebook": "Other Page"}}
+                store.data["approvedDestinations"] = {"eden": renamed("facebook", "Other Page")}
                 api.get.reset_mock()
                 with self.assertRaises(RuntimeError):
                     tick_brand("eden", eden_cfg(), store, now, api, issues, valid_writer())
@@ -227,7 +243,7 @@ class DestinationIdentity(unittest.TestCase):
                 self.assertNotIn("facebook", reads)
 
     def test_rows_are_held_when_the_destination_differs_from_the_approved_preview(self):
-        batch = plan("eden", date(2026, 11, 30), lambda _: None, TARGETS, destinations=NAMES)
+        batch = plan("eden", date(2026, 11, 30), lambda _: None, TARGETS, destinations=DESTS)
         state, sent = {"approvals": {}, "writes": {}}, []
         comment = {"user": {"id": 123}, "body": "/approve " + identity(batch), "edited": False}
         publish(
@@ -240,15 +256,17 @@ class DestinationIdentity(unittest.TestCase):
             preview(batch),
             [comment],
             lambda body: sent.append(body) or {"postSubmissionId": "x"},
-            current=NAMES | {"facebook": "Acacia Roofing"},
+            current=renamed("facebook", "Acacia Roofing"),
+            ahead=FAR,
         )
         self.assertEqual(sent, [])
+        self.assertEqual(len(state["writes"]), 7)
         self.assertTrue(all(row["status"] == "held" for row in state["writes"].values()))
 
     def test_automatic_week_needs_destinations_hank_approved(self):
         state = {"approvals": {"eden": ["2026-11-16", "2026-11-23"]}, "writes": {}}
-        state["approvedDestinations"] = {"eden": NAMES | {"facebook": "Other Page"}}
-        batch = plan("eden", date(2026, 11, 30), lambda _: None, TARGETS, destinations=NAMES)
+        state["approvedDestinations"] = {"eden": renamed("facebook", "Other Page")}
+        batch = plan("eden", date(2026, 11, 30), lambda _: None, TARGETS, destinations=DESTS)
         sent = []
         publish(
             batch,
@@ -260,7 +278,8 @@ class DestinationIdentity(unittest.TestCase):
             preview(batch),
             [],
             lambda body: sent.append(body) or {"postSubmissionId": "x"},
-            current=NAMES,
+            current=DESTS,
+            ahead=FAR,
         )
         self.assertEqual(sent, [])
 
@@ -285,12 +304,15 @@ class ConversationContext(unittest.TestCase):
         now = datetime(2026, 11, 30, 12, tzinfo=CT)
         new = dm("new", "Are you available?", now)
         with tempfile.TemporaryDirectory() as tmp, State(Path(tmp)) as store:
-            store.data["inboxSince"]["eden"] = (now - timedelta(minutes=15)).isoformat()
+            store.data["inboxSince"]["eden/instagram"] = (now - timedelta(minutes=15)).isoformat()
             api, issues, writer = Mock(), Mock(), valid_writer()
             issues.ensure.return_value = 4
             api.post.return_value = {"id": "sent"}
 
             def get(path, **params):
+                if path == "/conversations/thread":
+                    # Blotato reports the conversation as new, so only its history decides.
+                    return conversation_get(now - timedelta(minutes=5))
                 if path != "/messages":
                     return {"items": []}
                 if params.get("conversationId") == "thread":
@@ -321,16 +343,20 @@ class ContactBudget(unittest.TestCase):
     def test_reply_budget_counts_distinct_contacts_and_holds_the_rest(self):
         now = datetime(2026, 11, 30, 12, tzinfo=CT)
         with tempfile.TemporaryDirectory() as tmp, State(Path(tmp)) as store:
-            store.data["inboxSince"]["eden"] = (now - timedelta(minutes=15)).isoformat()
+            store.data["inboxSince"]["eden/instagram"] = (now - timedelta(minutes=15)).isoformat()
             api, issues, writer = Mock(), Mock(), valid_writer()
             issues.ensure.return_value = 4
             api.post.return_value = {"id": "sent"}
             batch = [dm("1", "How do I book?", now, "c1", "guest-1")]
-            api.get.side_effect = lambda path, **p: {
-                "items": [m for m in batch if p.get("conversationId") in (None, m["conversationId"])]
-                if path == "/messages"
-                else []
-            }
+
+            def get(path, **p):
+                if path.startswith("/conversations/"):
+                    return conversation_get(now, path.rsplit("/", 1)[1])
+                if path == "/messages":
+                    return {"items": [m for m in batch if p.get("conversationId") in (None, m["conversationId"])]}
+                return {"items": []}
+
+            api.get.side_effect = get
             limits = BUDGET | {"contactChargeLimitCents": 2}
             process_inbox("eden", {"instagram": {"accountId": "a"}}, store, now, api, issues, writer, limits)
             self.assertEqual(api.post.call_count, 1)
@@ -346,10 +372,14 @@ class ContactBudget(unittest.TestCase):
     def test_uncertain_send_keeps_its_reservation(self):
         now = datetime(2026, 11, 30, 12, tzinfo=CT)
         with tempfile.TemporaryDirectory() as tmp, State(Path(tmp)) as store:
-            store.data["inboxSince"]["eden"] = (now - timedelta(minutes=15)).isoformat()
+            store.data["inboxSince"]["eden/instagram"] = (now - timedelta(minutes=15)).isoformat()
             api, issues = Mock(), Mock()
             message = dm("1", "How do I book?", now, "c1", "guest-1")
-            api.get.side_effect = lambda path, **p: {"items": [message] if path == "/messages" else []}
+            api.get.side_effect = lambda path, **p: (
+                conversation_get(now, "c1")
+                if path == "/conversations/c1"
+                else {"items": [message] if path == "/messages" else []}
+            )
             api.post.side_effect = RemoteError()
             with self.assertRaises(RemoteError):
                 process_inbox(
@@ -418,7 +448,9 @@ class WithdrawnPhoto(unittest.TestCase):
     def test_held_photo_rows_are_not_submitted_and_raise_one_alert(self):
         url = "https://example.org/safe.jpg"
         source = {"kind": "companycam", "id": "7", "version": "10/abc"}
-        batch = plan("eden", date(2026, 11, 30), lambda _: {"url": url, "source": source}, TARGETS)
+        batch = plan(
+            "eden", date(2026, 11, 30), lambda _: {"url": url, "source": source}, TARGETS, destinations=DESTS
+        )
         self.assertEqual(batch["days"][0]["source"], source)
         self.assertNotIn('"7"', preview(batch))
         state, sent = {"approvals": {}, "writes": {}, "events": {}}, []
@@ -437,6 +469,8 @@ class WithdrawnPhoto(unittest.TestCase):
                 sent.append(body) or {"postSubmissionId": "x", "scheduledTime": body["scheduledTime"]}
             ),
             recheck=lambda day: next(verdicts),
+            current=DESTS,
+            ahead=FAR,
         )
         self.assertEqual(len(sent), 12)
         held = [k for k, row in state["writes"].items() if row["status"] == "held"]
@@ -451,15 +485,17 @@ class WithdrawnPhoto(unittest.TestCase):
 
 
 def git_repo(tmp, files):
-    repo = Path(tmp) / "stays"
-    (repo / "public/images").mkdir(parents=True)
+    """A Mini checkout whose origin is a local upstream repository (the picker fetches it)."""
+    upstream = Path(tmp) / "upstream"
+    (upstream / "public/images").mkdir(parents=True)
     for name, data in files.items():
-        (repo / "public/images" / name).write_bytes(data)
-    run = lambda *a: subprocess.run(["git", "-C", str(repo), *a], check=True, capture_output=True)
-    run("init", "-q")
+        (upstream / "public/images" / name).write_bytes(data)
+    run = lambda *a: subprocess.run(["git", "-C", str(upstream), *a], check=True, capture_output=True)
+    run("init", "-q", "-b", "main")
     run("add", ".")
     run("-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", "fixture")
-    run("update-ref", "refs/remotes/origin/main", "HEAD")
+    repo = Path(tmp) / "stays"
+    subprocess.run(["git", "clone", "-q", str(upstream), str(repo)], check=True, capture_output=True)
     return repo
 
 
@@ -576,7 +612,10 @@ class DisconnectedDestination(unittest.TestCase):
             issues.ensure.return_value = 1
             issues.read.return_value = ("", [])
             store.data["approvedDestinations"] = {
-                "acacia": {"instagram": "@acaciaroofing", "facebook": "Acacia Roofing"}
+                "acacia": {
+                    "instagram": {"accountId": "ig", "name": "@acaciaroofing"},
+                    "facebook": {"accountId": "fb", "pageId": "page", "name": "Acacia Roofing"},
+                }
             }
             store.data["writes"]["acacia/2099-11-20/facebook"] = {
                 "status": "uncertain",
@@ -591,7 +630,8 @@ class DisconnectedDestination(unittest.TestCase):
                 tick_brand("acacia", cfg, store, now, api, issues, valid_writer())
             titles = [c.args[0] for c in issues.ensure.call_args_list]
             self.assertTrue(any("Google Business" in t for t in titles))
-            self.assertIn("acacia", store.data["inboxSince"])
+            self.assertIn("acacia/instagram", store.data["inboxSince"])
+            self.assertIn("acacia/facebook", store.data["inboxSince"])
             self.assertTrue(any("check delivery" in t for t in titles))
 
 

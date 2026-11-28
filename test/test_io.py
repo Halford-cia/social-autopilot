@@ -70,7 +70,7 @@ class Operational(unittest.TestCase):
             api, issues = Mock(), Mock()
             issues.ensure.return_value = 7
             now = datetime.now(timezone.utc)
-            store.data["inboxSince"]["eden"] = "2026-01-01T00:00:00+00:00"
+            store.data["inboxSince"]["eden/instagram"] = "2026-01-01T00:00:00+00:00"
             row = dict(
                 id="c",
                 platform="instagram",

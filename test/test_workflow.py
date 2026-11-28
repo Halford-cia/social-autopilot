@@ -1,5 +1,5 @@
 import unittest
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from social.planner import identity, plan, preview
 from social.workflow import publish
@@ -11,11 +11,14 @@ TARGETS = {
     "facebook": {"accountId": "fb", "pageId": "page"},
     "googlebusiness": {"accountId": "gb", "locationId": "accounts/a/locations/b"},
 }
+# Verified destinations as the preview records them, and every slot within the submit window.
+DESTS = {p: dict(t, name=p + " fixture") for p, t in TARGETS.items()}
+FAR = timedelta(days=30)
 
 
 class Workflow(unittest.TestCase):
     def setUp(self):
-        self.batch = plan("eden", D, lambda _: "https://example.org/safe.jpg", TARGETS)
+        self.batch = plan("eden", D, lambda _: "https://example.org/safe.jpg", TARGETS, destinations=DESTS)
         self.state = {"approvals": {}, "writes": {}}
         self.calls = []
         self.manual = {"user": {"id": 123}, "body": "/approve " + identity(self.batch), "edited": False}
@@ -35,6 +38,8 @@ class Workflow(unittest.TestCase):
             preview(self.batch) if body is None else body,
             comments,
             sink or send,
+            current=DESTS,
+            ahead=FAR,
         )
 
     def test_bound_to_content_approver_brand_and_switch(self):
@@ -47,6 +52,7 @@ class Workflow(unittest.TestCase):
             self.run_batch(comments, True, body)
         self.assertEqual(self.calls, [])
         self.state["approvals"]["eden"] = ["2026-11-02", "2026-11-09"]
+        self.state["approvedDestinations"] = {"eden": dict(DESTS)}  # what those approvals confirmed
         self.run_batch()
         self.assertEqual(self.calls, [])
         self.run_batch(auto=True)
@@ -79,11 +85,13 @@ class Workflow(unittest.TestCase):
             return {"postSubmissionId": "test", "scheduledTime": body["scheduledTime"]}
 
         for day in (date(2026, 11, 30), date(2026, 12, 7)):
-            batch = plan("eden", day, lambda _: None, TARGETS)
+            batch = plan("eden", day, lambda _: None, TARGETS, destinations=DESTS)
             manual = [{"user": {"id": 123}, "body": "/approve " + identity(batch), "edited": False}]
             late = datetime.fromisoformat(batch["days"][1]["time"])
-            publish(batch, self.state, lambda: None, late, False, 123, preview(batch), manual, send)
+            publish(
+                batch, self.state, lambda: None, late, False, 123, preview(batch), manual, send, current=DESTS, ahead=FAR
+            )
         self.assertEqual(self.state["approvals"]["eden"], ["2026-11-30", "2026-12-07"])
-        third = plan("eden", date(2026, 12, 14), lambda _: None, TARGETS)
-        publish(third, self.state, lambda: None, NOW, True, 123, preview(third), [], send)
+        third = plan("eden", date(2026, 12, 14), lambda _: None, TARGETS, destinations=DESTS)
+        publish(third, self.state, lambda: None, NOW, True, 123, preview(third), [], send, current=DESTS, ahead=FAR)
         self.assertIn("eden/2026-12-14/facebook", self.state["writes"])

@@ -59,7 +59,9 @@ def demo(start):
             ),
             targets[brand]["targets"],
             compose=lambda b, w, cards: write_week(b, w, cards, DemoWriter()),
-            destinations=DEMO_DESTINATIONS[brand],
+            destinations={
+                p: dict(targets[brand]["targets"][p], name=name) for p, name in DEMO_DESTINATIONS[brand].items()
+            },
         )
         blocks.append(preview(batch))
     return "\n\n".join(blocks)

@@ -1,3 +1,4 @@
+import calendar
 import fcntl
 import hashlib
 import json
@@ -12,7 +13,7 @@ from .digest import bounds, digest
 from .inbox import route
 from .media import media_picker, recheck_company, recheck_repo
 from .planner import BRANDS, CT, LABELS, caption, plan, preview, verify_copy
-from .sources import check
+from .sources import check, refresh_repo
 from .workflow import publish
 from .writing import reply_text, write_week
 
@@ -72,7 +73,7 @@ def validate_contact_limits(limits):
         raise ValueError("Configure the Blotato contact budget")
     if any(type(v) is not int for v in limits.values()) or limits["contactChargeLimitCents"] < 0:
         raise ValueError("Configure the Blotato contact budget")
-    if limits["contactChargeCents"] < 1 or not 1 <= limits["billingPeriodDay"] <= 28:
+    if limits["contactChargeCents"] < 1 or not 1 <= limits["billingPeriodDay"] <= 31:
         raise ValueError("Configure the Blotato contact budget")
 
 
@@ -110,9 +111,10 @@ BRAND_WORDS = {"acacia": "acacia", "eden": "eden"}
 def check_destinations(brand, cfg, api):
     """Resolve each configured destination to the name Blotato reports for it.
 
-    Returns ({platform: name}, [(platform, reason)]). A destination that is missing, on the wrong
-    platform, unnamed, or named for the other brand is left out, and the rest keep working.
-    A failure to list accounts at all raises.
+    Returns ({platform: {**configured IDs, "name": name}}, [(platform, reason)]). The IDs travel with
+    the name so an approval binds the exact account and Page or location, not just a display name.
+    A destination that is missing, on the wrong platform, unnamed, or named for the other brand is
+    left out (held), and the rest keep working. A failure to list accounts at all raises.
     """
     targets = cfg["brands"][brand]["targets"]
     accounts = {item["id"]: item for item in api.get("/users/me/accounts")["items"]}
@@ -145,7 +147,7 @@ def check_destinations(brand, cfg, api):
         elif other in name.casefold():
             problems.append((platform, "named for the other brand"))
         else:
-            resolved[platform] = name
+            resolved[platform] = dict(target, name=name)
     return resolved, problems
 
 
@@ -158,12 +160,21 @@ def notice(issues, title, message):
 
 
 def period_start(now, day):
-    """Start of the Blotato billing period that contains now (UTC date, period day 1 to 28)."""
+    """Start of the Blotato billing period that contains now (UTC date).
+
+    The period is anchored on `day` (1 to 31). In a shorter month it starts on that month's last
+    day, as month-end subscription anchors do (an anchor of 31 starts Feb 28, then Mar 31).
+    """
     today = now.astimezone(UTC).date()
-    if today.day >= day:
-        return today.replace(day=day)
-    first = today.replace(day=1) - timedelta(days=1)
-    return first.replace(day=day)
+
+    def anchor(month_start):
+        last = calendar.monthrange(month_start.year, month_start.month)[1]
+        return month_start.replace(day=min(day, last))
+
+    this = anchor(today.replace(day=1))
+    if today >= this:
+        return this
+    return anchor((today.replace(day=1) - timedelta(days=1)).replace(day=1))
 
 
 class Contacts:
@@ -183,6 +194,9 @@ class Contacts:
         self.ledger = periods.setdefault(self.period, {"contacts": [], "reservedCents": 0})
 
     def allows(self, contact):
+        # A zero limit is the documented off switch: it stops returning contacts too.
+        if self.limit <= 0:
+            return False
         return contact in self.ledger["contacts"] or self.ledger["reservedCents"] + self.charge <= self.limit
 
     def reserve(self, contact):
@@ -220,22 +234,60 @@ def first_in_conversation(api, platform, dest, item):
         return False
 
 
+# Blotato keeps messages for 45 days; a day of margin keeps the retained history complete.
+RETAINED = timedelta(days=44)
+
+
+def fresh_conversation(api, platform, dest, item, activated, now):
+    """Positive evidence that Blotato holds this conversation from its start and that it is new.
+
+    Blotato imports no messages from before an account connects and keeps 45 days. A conversation
+    counts as new only when Blotato reports it started after this destination's inbox activation
+    (which follows the connection) and inside the retained window, and its retained history is
+    exactly this message. Anything else, including a read error, stays with the host.
+    """
+    cid = item["conversationId"]
+    try:
+        conv = api.get("/conversations/" + quote(cid, safe=""))
+        if conv.get("id") != cid or conv.get("accountId") != dest["accountId"] or conv.get("platform") != platform:
+            return False
+        started = datetime.fromisoformat(conv["createdAt"])
+        if not activated <= started <= now or started < now - RETAINED:
+            return False
+    except (RemoteError, KeyError, TypeError, ValueError, AttributeError):
+        return False
+    return first_in_conversation(api, platform, dest, item)
+
+
+def linked_handoffs(holds, key):
+    """Every handoff issue ever opened for a DM thread. Older ledgers stored a single number."""
+    found = holds.get(key) or []
+    return [found] if isinstance(found, int) else list(found)
+
+
 def process_inbox(brand, targets, store, now, api, issues, writer, contact_limits=None):
     state = store.data
     contacts = Contacts(contact_limits, store, now)
-    if brand not in state["inboxSince"]:
-        state["inboxSince"][brand] = now.isoformat()
-        store.save()
-        return
-    # A small overlap catches delayed delivery. The event ledger prevents repeat replies.
-    watermark = datetime.fromisoformat(state["inboxSince"][brand])
-    since = max(now - timedelta(days=45), watermark - timedelta(minutes=5))
-    activated = state.setdefault("activated", {}).setdefault(brand, state["inboxSince"][brand])
-    since = max(since, datetime.fromisoformat(activated))
+    cursors = state["inboxSince"]
+    starts = state.setdefault("activated", {})
     fb_posts = None
     for platform, dest in targets.items():
         if platform == "googlebusiness":
             continue
+        key = brand + "/" + platform
+        if key not in cursors:
+            # A destination's first eligible cycle only records its start time. Anything that
+            # arrived earlier is answered by hand in Blotato.
+            cursors[key] = starts[key] = now.isoformat()
+            store.save()
+            continue
+        activated = datetime.fromisoformat(starts.setdefault(key, cursors[key]))
+        # Each destination keeps its own last successful read, so an outage on one platform cannot
+        # skip that platform's arrivals. A small overlap catches delayed delivery; the event
+        # ledger prevents repeat replies.
+        since = max(
+            now - timedelta(days=45), datetime.fromisoformat(cursors[key]) - timedelta(minutes=5), activated
+        )
         for kind in ("comments", "messages"):
             params = dict(platform=platform, accountId=dest["accountId"], limit=100)
             if kind == "comments":
@@ -295,45 +347,53 @@ def process_inbox(brand, targets, store, now, api, issues, writer, contact_limit
                                 f"Review the Facebook comment received {item['createdAt']} in Blotato. Its Page could not be verified.",
                             )
                         continue
-                thread_key = None
+                thread_key, cleared = None, False
                 holds = state.setdefault("threads", {})
                 if kind == "messages" and item.get("conversationId"):
                     thread_key = event_ref(brand, platform, item["conversationId"])
-                    if thread_key in holds:
-                        if issues.open(holds[thread_key]):
-                            state["events"][ref] = {
-                                "brand": brand,
-                                "kind": kind,
-                                "platform": platform,
-                                "time": item["createdAt"],
-                                "status": "human",
-                                "issue": holds[thread_key],
-                            }
-                            store.save()
-                            continue
-                        del holds[thread_key]
-                        # Hank closed the handoff: the host resolved what came before.
-                        state.setdefault("released", {})[thread_key] = now.isoformat()
+                    linked = linked_handoffs(holds, thread_key)
+                    # Handoffs stay linked to their thread. Any open one, including one Hank
+                    # reopened, keeps the thread with the host.
+                    still_open = next((n for n in linked if issues.open(n)), None)
+                    if still_open is not None:
+                        state["events"][ref] = {
+                            "brand": brand,
+                            "kind": kind,
+                            "platform": platform,
+                            "time": item["createdAt"],
+                            "status": "human",
+                            "issue": still_open,
+                        }
+                        store.save()
+                        continue
+                    # Hank closed every handoff in this thread: the host cleared what came before.
+                    cleared = bool(linked)
                 if kind == "messages" and action == "send":
                     thread = groups.get(item.get("conversationId"), [])
                     if not item.get("conversationId") or len(thread) != 1:
                         action, payload = "human", None
-                    elif thread_key not in state.get("released", {}) and not first_in_conversation(
-                        api, platform, dest, item
-                    ):
-                        # Earlier messages (including ones before activation) may be an open
-                        # service request. The host keeps that conversation.
+                    elif not cleared and not fresh_conversation(api, platform, dest, item, activated, now):
+                        # The conversation may hold an open service request from before Blotato
+                        # captured it, or older than its retention. The host keeps it.
                         action, payload = "human", None
                 contact = contact_key(kind, platform, dest, item) if action == "send" else None
                 if action == "send" and not contacts.allows(contact):
                     action, payload = "human", None
-                    notice(
-                        issues,
-                        "Blotato reply budget · " + contacts.period,
-                        "The contact budget for this Blotato billing period is used. Eligible Stay Eden "
-                        "questions now go to the host with no automatic reply. Raise "
-                        "`blotato.contactChargeLimitCents` in the local config to resume replies.",
-                    )
+                    if contacts.limit <= 0:
+                        notice(
+                            issues,
+                            "Blotato automatic replies off · " + contacts.period,
+                            "`blotato.contactChargeLimitCents` is 0, so automatic replies are off. Eligible "
+                            "Stay Eden questions go to the host with no reply, returning contacts included.",
+                        )
+                    else:
+                        notice(
+                            issues,
+                            "Blotato reply budget · " + contacts.period,
+                            "The contact budget for this Blotato billing period is used. Eligible Stay Eden "
+                            "questions now go to the host with no automatic reply. Raise "
+                            "`blotato.contactChargeLimitCents` in the local config to resume replies.",
+                        )
                 if action == "send":
                     try:
                         text = reply_text(writer, payload["text"])
@@ -354,7 +414,8 @@ def process_inbox(brand, targets, store, now, api, issues, writer, contact_limit
                     record["issue"] = notice(issues, BRANDS[brand] + " · inbox " + ref, body)
                     record["status"] = "human"
                     if thread_key:
-                        holds[thread_key] = record["issue"]
+                        linked = linked_handoffs(holds, thread_key)
+                        holds[thread_key] = linked + ([] if record["issue"] in linked else [record["issue"]])
                 else:
                     record["status"] = "uncertain"
                     state["events"][ref] = record
@@ -365,8 +426,8 @@ def process_inbox(brand, targets, store, now, api, issues, writer, contact_limit
                         record.update(status="queued", id=result["id"])
                 state["events"][ref] = record
                 store.save()
-    state["inboxSince"][brand] = now.isoformat()
-    store.save()
+        cursors[key] = now.isoformat()  # both feeds of this destination were read
+        store.save()
 
 
 # Blotato documents that an unmatched submission reads `in-progress` and that a polling deadline
@@ -410,7 +471,8 @@ def audit_delivery(brand, store, now, api, issues):
             )
             store.save()
     for ref, row in store.data["events"].items():
-        if row["brand"] != brand or row.get("status") not in ("queued", "uncertain", "failed"):
+        # An unresolved reply stays here until its issue exists, so a GitHub outage cannot lose it.
+        if row["brand"] != brand or row.get("status") not in ("queued", "uncertain", "failed", "unresolved"):
             continue
         if row["status"] == "queued":
             result = api.get("/" + row["kind"] + "/" + quote(row["id"], safe=""))
@@ -431,7 +493,12 @@ def audit_delivery(brand, store, now, api, issues):
 
 
 def source_checker(brand, cfg):
-    """recheck(day) for publish: the photo's source must still be eligible and unchanged."""
+    """recheck(day) for publish: the photo's source must still be eligible and unchanged.
+
+    The Stay Eden checkout is fetched from upstream once per cycle before any photo is checked, so a
+    photo the owner removed on GitHub is held. If the fetch fails, no photo is cleared this cycle
+    ("retry") and recheck.failed records why, for the caller's alert.
+    """
     keys = {}
 
     def recheck(day):
@@ -444,11 +511,19 @@ def source_checker(brand, cfg):
                     keys["k"] = secret("COMPANYCAM_API_KEY")
                 return recheck_company(origin, keys["k"])
             if brand == "eden" and origin.get("kind") == "repo":
+                if "fetched" not in keys:
+                    keys["fetched"] = False
+                    refresh_repo(cfg["edenRepo"])
+                    keys["fetched"] = True
+                if not keys["fetched"]:
+                    return "retry"
                 return recheck_repo(origin, cfg["edenRepo"])
-        except (ValueError, OSError, subprocess.SubprocessError):
+        except (ValueError, OSError, subprocess.SubprocessError) as exc:
+            recheck.failed.append(type(exc).__name__)
             return "retry"
         return "held"
 
+    recheck.failed = []
     return recheck
 
 
@@ -497,6 +572,7 @@ def weekly(brand, cfg, store, now, api, issues, writer, resolved=None):
             record["issue"] = notice(issues, BRANDS[brand] + " · approve " + week.isoformat(), body)
             store.save()
         issue_body, comments = issues.read(record["issue"])
+        recheck = source_checker(brand, cfg)
         outcome = publish(
             batch,
             store.data,
@@ -509,8 +585,15 @@ def weekly(brand, cfg, store, now, api, issues, writer, resolved=None):
             lambda payload: api.post("/posts", payload),
             clock=lambda: datetime.now(CT),
             current=resolved,
-            recheck=source_checker(brand, cfg),
+            recheck=recheck,
         )
+        if recheck.failed:
+            notice(
+                issues,
+                f"{BRANDS[brand]} · photo source · {now.astimezone(CT).date()} needs attention",
+                f"A photo's source could not be checked ({recheck.failed[0]}), so its posts were not "
+                "submitted this cycle. They wait for a later cycle and expire if their slot passes.",
+            )
         if outcome == "destinations":
             notice(
                 issues,
@@ -520,11 +603,24 @@ def weekly(brand, cfg, store, now, api, issues, writer, resolved=None):
             )
 
 
-def monday_digest(brand, targets, store, now, api, issues):
+def digest_targets(brand, store, week):
+    """The destinations posts went to that week, independent of this cycle's lookups.
+
+    The week's own preview names them; failing that, the destinations Hank last confirmed.
+    """
+    record = store.data["batches"].get(brand + "/" + week) or {}
+    shown = (record.get("batch") or {}).get("destinations")
+    if shown is None:
+        shown = store.data.get("approvedDestinations", {}).get(brand, {})
+    return {p: d for p, d in shown.items() if isinstance(d, dict)}
+
+
+def monday_digest(brand, store, now, api, issues):
     local = now.astimezone(CT).date()
     previous = (local - timedelta(days=local.weekday() + 7)).isoformat()
     digest_key = brand + "/" + previous
     if digest_key not in store.data["digests"]:
+        targets = digest_targets(brand, store, previous)
         lo, hi = bounds(previous)
         rows = pages(
             api.get,
@@ -573,8 +669,9 @@ def tick_brand(brand, cfg, store, now, api, issues, writer):
         notice(
             issues,
             f"{BRANDS[brand]} · {LABELS[platform]} inbox paused · {day}",
-            f"Blotato now names this {LABELS[platform]} “{resolved[platform]}”, not the account you approved. "
-            "Its inbox is paused until you approve a week whose preview shows the right name.",
+            f"Blotato now reports this {LABELS[platform]} as “{resolved[platform]['name']}”, and its name or "
+            "configured ID differs from the account you approved. Its inbox is paused until you approve a "
+            "week whose preview shows the right account.",
         )
 
     def inbox():
@@ -585,7 +682,7 @@ def tick_brand(brand, cfg, store, now, api, issues, writer):
 
     stages = {
         "inbox": inbox,
-        "digest": lambda: monday_digest(brand, verified, store, now, api, issues),
+        "digest": lambda: monday_digest(brand, store, now, api, issues),
         "weekly": lambda: weekly(brand, cfg, store, now, api, issues, writer, resolved),
         "delivery": lambda: audit_delivery(brand, store, now, api, issues),
     }

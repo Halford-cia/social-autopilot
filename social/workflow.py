@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from .api import RemoteError
 from .planner import caption, identity, preview, verify_copy
@@ -34,15 +34,43 @@ def approves(comment, owner, token):
     )
 
 
+# Rows stay in the local ledger until shortly before their slot. Each cycle in this window rechecks
+# the approval or the autoPublish switch, the preview, the destination and the photo source, so a
+# change made days earlier (switch off, issue closed, photo withdrawn) stops the post. Blotato's
+# calendar shows a post only once it is submitted.
+SUBMIT_AHEAD = timedelta(hours=3)
+
+
+def bound(shown, target):
+    """The preview verified this destination and it carries the configured IDs."""
+    return isinstance(shown, dict) and bool(shown.get("name")) and all(shown.get(k) == v for k, v in target.items())
+
+
 def publish(
-    batch, state, save, now, auto, owner, issue_body, comments, send, clock=None, *, current=None, recheck=None
+    batch,
+    state,
+    save,
+    now,
+    auto,
+    owner,
+    issue_body,
+    comments,
+    send,
+    clock=None,
+    *,
+    current=None,
+    recheck=None,
+    ahead=None,
 ):
     """Claim before sending. An unknown POST outcome needs operator reconciliation.
 
-    current: destination names Blotato reports now ({platform: name}); a row is only sent to the
-    destination shown in the approved preview. recheck(day) -> "ok" | "held" | "retry" confirms a
-    photo's source is still eligible and unchanged before each submission.
+    current: destinations Blotato reports now ({platform: {IDs..., "name"}}). A row is only sent to a
+    destination the approved preview verified, with the same name and IDs Blotato reports now; a
+    destination the preview marked held never receives a post. recheck(day) -> "ok" | "held" |
+    "retry" confirms a photo's source is still eligible and unchanged. A row is submitted only
+    within `ahead` (default SUBMIT_AHEAD) of its slot.
     """
+    ahead = SUBMIT_AHEAD if ahead is None else ahead
     verify_copy(batch)
     brand, week = batch["brand"], batch["week"]
     token = identity(batch)
@@ -77,9 +105,14 @@ def publish(
                 writes[key] = {"status": "expired"}
                 save()
                 continue
-            if current is not None and current.get(platform) != shown.get(platform):
-                if current.get(platform) is None and shown.get(platform) is not None:
-                    continue  # disconnected now; retry on a later cycle until the slot passes
+            if due - now > ahead:
+                continue  # not yet: the next cycles recheck everything before this slot
+            target = batch["targets"].get(platform)
+            if target is None or not bound(shown.get(platform), target):
+                continue  # held in the preview: nothing is ever sent there for this week
+            if current is None or current.get(platform) is None:
+                continue  # not verified now; retry on a later cycle until the slot passes
+            if current[platform] != shown[platform]:
                 writes[key] = {"status": "held", "reason": "destination", "due": day["time"], "batch": token}
                 save()
                 continue

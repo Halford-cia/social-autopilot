@@ -11,7 +11,7 @@ from urllib.parse import urlencode, urlsplit
 from PIL import Image, ImageOps
 
 from .api import RemoteError, request
-from .sources import blob_sha, git_bytes
+from .sources import blob_sha, git_bytes, refresh_repo
 
 FLAGS = (
     "face",
@@ -330,6 +330,9 @@ def recheck_repo(source, repo):
 
 def media_picker(brand, config, api, company_key=None):
     photos = company_photos(company_key, sources=True) if brand == "acacia" else None
+    if brand == "eden":
+        # Select from current upstream main, never a stale local ref; a failed fetch raises.
+        refresh_repo(config["edenRepo"])
 
     def pick(source):
         if photos is not None:

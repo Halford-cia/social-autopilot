@@ -38,6 +38,9 @@ def plan(brand, start, media, targets=None, *, compose=None, destinations=None):
         platforms = (["instagram"] if url else []) + ["facebook"]
         if brand == "acacia":
             platforms.append("googlebusiness")
+        if destinations is not None:
+            # A destination Blotato could not verify is held for the whole week: no row lists it.
+            platforms = [p for p in platforms if p in destinations]
         days.append(
             dict(
                 card=card,
@@ -88,12 +91,13 @@ def preview(batch):
     ]
     if "destinations" in batch:
         # The names Blotato reports for the configured IDs, so a swapped account shows here.
-        names = batch["destinations"]
+        names = {p: (d or {}).get("name") for p, d in batch["destinations"].items()}
         lines += [
             "**Destinations (as Blotato reports them)**",
             "",
             *[
-                f"- {LABELS[p]}: " + (f"“{names[p]}”" if names.get(p) else "not verified, held")
+                f"- {LABELS[p]}: "
+                + (f"“{names[p]}”" if names.get(p) else "not verified, held: nothing is posted there this week")
                 for p in LABELS
                 if p in batch["targets"]
             ],
