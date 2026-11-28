@@ -12,7 +12,19 @@ from .claude import RunLimit, validate_limits
 from .digest import bounds, digest
 from .inbox import route
 from .media import media_picker, recheck_company, recheck_repo
-from .planner import BRANDS, CT, LABELS, caption, current_format, identity, plan, preview, replacement, verify_copy
+from .planner import (
+    BRANDS,
+    CT,
+    LABELS,
+    b98b864_preview,
+    caption,
+    current_format,
+    identity,
+    plan,
+    preview,
+    replacement,
+    verify_copy,
+)
 from .sources import check, refresh_repo
 from .workflow import publish
 from .writing import reply_text, write_week
@@ -259,6 +271,44 @@ def fresh_conversation(api, platform, dest, item, activated, now):
     return first_in_conversation(api, platform, dest, item)
 
 
+def handoffs_closed_at(issues, linked):
+    """When Hank last closed this thread's handoffs (the latest close), or None if any close time is
+    missing or unreadable. Called only once every linked handoff is closed."""
+    try:
+        return max(datetime.fromisoformat(issues.closed_at(n)) for n in linked)
+    except (TypeError, ValueError):
+        return None
+
+
+def after_resolution(api, platform, dest, item, closed):
+    """The host's closed handoff cleared this conversation up to its close time, and nothing more.
+
+    True only when this message arrived after that close and Blotato's history of the conversation
+    holds nothing else after it: no later guest message and no later host message (Blotato lists the
+    host's own messages as `outgoing`). A host who writes again after closing the handoff is still
+    working the conversation, so a guest's next question stays with the host. A read error also does.
+    """
+    try:
+        if datetime.fromisoformat(item["createdAt"]) <= closed:
+            return False
+        found = False
+        for row in pages(
+            api.get,
+            "/messages",
+            conversationId=item["conversationId"],
+            accountId=dest["accountId"],
+            platform=platform,
+            limit=250,
+        ):
+            if row["id"] == item["id"]:
+                found = True
+            elif datetime.fromisoformat(row["createdAt"]) > closed:
+                return False
+        return found
+    except (RemoteError, KeyError, TypeError, ValueError):
+        return False
+
+
 def linked_handoffs(holds, key):
     """Every handoff issue ever opened for a DM thread. Older ledgers stored a single number."""
     found = holds.get(key) or []
@@ -269,6 +319,36 @@ def inbox_key(brand, platform, dest):
     """Cursor and inbox start belong to one verified destination: a replacement account or Page
     starts its own inbox, and the same destination recovering from an outage keeps its cursor."""
     return "/".join([brand, platform, dest["accountId"]] + ([dest["pageId"]] if dest.get("pageId") else []))
+
+
+def adopt_legacy_cursors(brand, store):
+    """Bind each cursor from a ledger that kept one cursor per platform (before 449r3) to its owner.
+
+    The owner is the destination Hank had confirmed, with its IDs, when the previous version ran.
+    This runs at the start of the first cycle on this version, before any approval in that cycle
+    can change the confirmation. Without IDs that establish the owner (round-two ledgers stored
+    names only), the old cursor is dropped and each destination starts at its first eligible cycle.
+    """
+    state = store.data
+    cursors, starts = state["inboxSince"], state.setdefault("activated", {})
+    confirmed = state.get("approvedDestinations", {}).get(brand, {})
+    changed = False
+    for platform in ("instagram", "facebook"):
+        legacy = brand + "/" + platform
+        if legacy not in cursors and legacy not in starts:
+            continue
+        owner = confirmed.get(platform)
+        needed = ("accountId", "pageId") if platform == "facebook" else ("accountId",)
+        if isinstance(owner, dict) and all(isinstance(owner.get(k), str) and owner[k] for k in needed):
+            key = inbox_key(brand, platform, owner)
+            if key not in cursors and legacy in cursors:
+                cursors[key] = cursors[legacy]
+                starts[key] = starts.get(legacy, cursors[key])
+        cursors.pop(legacy, None)
+        starts.pop(legacy, None)
+        changed = True
+    if changed:
+        store.save()
 
 
 def thread_replies(api, platform, dest, item):
@@ -303,13 +383,6 @@ def process_inbox(brand, targets, store, now, api, issues, writer, contact_limit
         if platform == "googlebusiness":
             continue
         key = inbox_key(brand, platform, dest)
-        legacy = brand + "/" + platform
-        if key not in cursors and legacy in cursors:
-            # A ledger from before cursors were keyed by destination: it belongs to the destination
-            # in use when this version starts, so that one keeps its cursor and start.
-            cursors[key] = cursors.pop(legacy)
-            starts[key] = starts.pop(legacy, cursors[key])
-            store.save()
         if key not in cursors:
             # A destination's first eligible cycle only records its start time. Anything that
             # arrived earlier is answered by hand in Blotato.
@@ -382,7 +455,7 @@ def process_inbox(brand, targets, store, now, api, issues, writer, contact_limit
                                 f"Review the Facebook comment received {item['createdAt']} in Blotato. Its Page could not be verified.",
                             )
                         continue
-                thread_key, cleared = None, False
+                thread_key, linked = None, []
                 holds = state.setdefault("threads", {})
                 if kind == "comments":
                     # One public thread: a top-level comment and its direct replies.
@@ -421,13 +494,17 @@ def process_inbox(brand, targets, store, now, api, issues, writer, contact_limit
                         }
                         store.save()
                         continue
-                    # Hank closed every handoff in this thread: the host cleared what came before.
-                    cleared = bool(linked)
                 if kind == "messages" and action == "send":
                     thread = groups.get(item.get("conversationId"), [])
                     if not item.get("conversationId") or len(thread) != 1:
                         action, payload = "human", None
-                    elif not cleared and not fresh_conversation(api, platform, dest, item, activated, now):
+                    elif linked:
+                        # Hank closed every handoff in this thread. That clears the history up to his
+                        # close, not anything the host or guest wrote after it.
+                        closed = handoffs_closed_at(issues, linked)
+                        if closed is None or not after_resolution(api, platform, dest, item, closed):
+                            action, payload = "human", None
+                    elif not fresh_conversation(api, platform, dest, item, activated, now):
                         # The conversation may hold an open service request from before Blotato
                         # captured it, or older than its retention. The host keeps it.
                         action, payload = "human", None
@@ -612,19 +689,40 @@ def weekly(brand, cfg, store, now, api, issues, writer, resolved=None):
         record = records.get(brand + "/" + week.isoformat())
         if not record or "batch" not in record:
             continue
-        for batch, holder, title in previews(brand, week.isoformat(), record, targets, resolved, store):
+        for batch, holder, title in previews(brand, week.isoformat(), record, targets, resolved, store, issues):
             publish_preview(brand, cfg, store, now, api, issues, batch, holder, title, resolved)
 
 
-def previews(brand, week, record, targets, resolved, store):
+def earlier_render(record, issues, store):
+    """True when the saved preview's issue holds the b98b864 rendering of its batch (names with no
+    Page or location ID). That approval cannot match today's preview, so the week would otherwise
+    stall with no error. The answer is kept once known; an issue body matching neither rendering
+    (an edited preview) is not, and stays held by the exact-body check."""
+    if record.get("render") in ("current", "b98b864"):
+        return record["render"] == "b98b864"
+    if issues is None or "issue" not in record:
+        return False
+    body, _ = issues.read(record["issue"])
+    if body == preview(record["batch"]):
+        record["render"] = "current"
+    elif body == b98b864_preview(record["batch"]):
+        record["render"] = "b98b864"
+    else:
+        return False
+    store.save()
+    return record["render"] == "b98b864"
+
+
+def previews(brand, week, record, targets, resolved, store, issues=None):
     """The previews that may post this week: the saved one, and a replacement for any destination
     whose configured IDs changed since it was saved (all of them for a batch saved in the round-two
-    format, which bound only names). A replacement keeps the week's receipts and needs its own
-    approval; the saved preview keeps posting to the destinations that did not change."""
+    format, which bound only names, or still shown in the b98b864 rendering, which showed no IDs). A
+    replacement keeps the week's receipts and needs its own approval; the saved preview keeps
+    posting to the destinations that did not change."""
     batch = record["batch"]
     if batch["brand"] != brand or batch["week"] != week:
         raise ValueError("Pending batch does not match its week; review original batch")
-    legacy = resolved is not None and not current_format(batch)
+    legacy = resolved is not None and (not current_format(batch) or earlier_render(record, issues, store))
     changed = sorted(set(targets) if legacy else {p for p in targets if batch["targets"].get(p) != targets[p]})
     if changed and resolved is None:
         raise ValueError("Pending batch destinations changed; review original batch")
@@ -658,6 +756,7 @@ def publish_preview(brand, cfg, store, now, api, issues, batch, record, title, r
     body = preview(batch)
     if "issue" not in record:
         record["issue"] = notice(issues, title, body)
+        record["render"] = "current"
         store.save()
     issue_body, comments = issues.read(record["issue"])
     recheck = source_checker(brand, cfg)
@@ -693,16 +792,19 @@ def publish_preview(brand, cfg, store, now, api, issues, batch, record, title, r
 
 
 def digest_targets(brand, store, week):
-    """The destinations posts went to that week, independent of this cycle's lookups.
+    """The destinations each feed posted to, with the time each took effect, independent of this
+    cycle's lookups and of the current config.
 
-    Per platform: the week's corrected-destination preview, else the week's own preview, else the
-    destination Hank last confirmed.
+    Only destinations Hank confirmed by approving a preview count: an automatic week posts only to
+    those, and a preview nobody approved (a replacement included) adds nothing. A ledger from before
+    this history was kept counts the destination Hank last confirmed for the whole week.
     """
-    record = store.data["batches"].get(brand + "/" + week) or {}
-    out = dict(store.data.get("approvedDestinations", {}).get(brand, {}))
-    for held in (record, record.get("replacement") or {}):
-        out.update((held.get("batch") or {}).get("destinations") or {})
-    return {p: d for p, d in out.items() if isinstance(d, dict)}
+    history = store.data.get("destinationHistory", {}).get(brand, {})
+    out = {p: list(h) for p, h in history.items() if h}
+    for p, d in store.data.get("approvedDestinations", {}).get(brand, {}).items():
+        if p not in out and isinstance(d, dict):
+            out[p] = [{"since": None, "destination": d}]
+    return out
 
 
 MEASURED = ("instagram", "facebook")
@@ -742,6 +844,7 @@ def monday_digest(brand, store, now, api, issues):
 def tick_brand(brand, cfg, store, now, api, issues, writer):
     targets = cfg["brands"][brand]["targets"]
     day = now.astimezone(CT).date()
+    adopt_legacy_cursors(brand, store)
     try:
         resolved, problems = check_destinations(brand, cfg, api)
     except (RuntimeError, ValueError, KeyError, TypeError) as exc:

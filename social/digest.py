@@ -8,17 +8,37 @@ def bounds(week):
     return start, start + timedelta(days=7)
 
 
+def effective(history, when):
+    """The destination in effect at `when`: the latest confirmation that started at or before it.
+    The first confirmation of a feed counts from the beginning. A bare destination dict is one
+    confirmation with no start time."""
+    if isinstance(history, dict):
+        return history
+    current = None
+    for n, entry in enumerate(history or []):
+        since = entry.get("since")
+        if n == 0 or since is None or datetime.fromisoformat(since) <= when:
+            current = entry["destination"]
+    return current
+
+
 def digest(brand, week, targets, rows):
+    """targets: per platform, a destination dict or its confirmation history
+    ([{"since": iso | None, "destination": {...}}]). A post counts once, and only on the destination
+    that was confirmed for its feed when it was published."""
     start, end = bounds(week)
     measured, total, excluded = [], 0, set()
     follows = []
     seen = set()
     for row in rows:
         platform, account, state = row["platform"], row.get("account") or {}, row["state"]
-        dest = targets.get(platform)
-        if not dest or account.get("id") != dest["accountId"] or state["type"] != "published":
+        if state["type"] != "published" or row["id"] in seen:
             continue
-        if not start <= datetime.fromisoformat(row["postTime"]) < end or row["id"] in seen:
+        when = datetime.fromisoformat(row["postTime"])
+        if not start <= when < end:
+            continue
+        dest = effective(targets.get(platform), when)
+        if not dest or account.get("id") != dest["accountId"]:
             continue
         seen.add(row["id"])
         if platform == "googlebusiness":

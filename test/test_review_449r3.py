@@ -181,7 +181,7 @@ class CommentThread(unittest.TestCase):
     def run_inbox(self, feed, replies):
         now = datetime(2026, 11, 30, 12, 50, tzinfo=CT)
         with tempfile.TemporaryDirectory() as tmp, State(Path(tmp)) as store:
-            store.data["inboxSince"]["eden/instagram"] = (now - timedelta(hours=1)).isoformat()
+            store.data["inboxSince"]["eden/instagram/a"] = (now - timedelta(hours=1)).isoformat()
             api, issues, writer = Mock(), Mock(), valid_writer()
             issues.ensure.side_effect = lambda title, body: 10 + issues.ensure.call_count
             issues.open.return_value = True
@@ -223,7 +223,7 @@ class CommentThread(unittest.TestCase):
         parent = comment("P", "Are you available?", now - timedelta(minutes=3))
         child = comment("C", "Actually I need help with a refund", now - timedelta(minutes=2), "P")
         with tempfile.TemporaryDirectory() as tmp, State(Path(tmp)) as store:
-            store.data["inboxSince"]["eden/instagram"] = (now - timedelta(hours=1)).isoformat()
+            store.data["inboxSince"]["eden/instagram/a"] = (now - timedelta(hours=1)).isoformat()
             api, issues, writer = Mock(), Mock(), valid_writer()
             issues.ensure.return_value = 21
             issues.open.return_value = True

@@ -67,7 +67,7 @@ class AuthoringPath(unittest.TestCase):
         self.api.post.return_value = {"id": "accepted"}
         self.writer.generate.side_effect = ["Happy to help! " + BOOKING, "We confirm your dates."]
         for brand in ("eden", "acacia"):
-            self.store.data["inboxSince"][brand + "/instagram"] = (now - timedelta(hours=1)).isoformat()
+            self.store.data["inboxSince"][brand + "/instagram/account"] = (now - timedelta(hours=1)).isoformat()
             process_inbox(brand, targets, self.store, now, self.api, self.issues, self.writer, self.cfg["blotato"])
         self.assertEqual(self.writer.generate.call_count, 2)
         for call in self.writer.generate.call_args_list:

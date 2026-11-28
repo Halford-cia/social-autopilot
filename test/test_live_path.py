@@ -102,10 +102,12 @@ class LivePath(unittest.TestCase):
                 api, issues, writer = Mock(), Mock(), Mock()
                 issues.ensure.return_value = 1
                 issues.open.return_value = handoff_open
+                # Hank closed it five minutes after the handoff, before the follow-up (449r4 P0).
+                issues.closed_at.return_value = None if handoff_open else (now + timedelta(minutes=5)).isoformat()
                 # A reply that passes validation, so only the open handoff can stop the send.
                 writer.generate.return_value = "Happy to help! " + BOOKING
                 api.post.return_value = {"id": "sent"}
-                store.data["inboxSince"]["eden/instagram"] = (now - timedelta(minutes=15)).isoformat()
+                store.data["inboxSince"]["eden/instagram/a"] = (now - timedelta(minutes=15)).isoformat()
 
                 def message(mid, text, stamp):
                     return dict(

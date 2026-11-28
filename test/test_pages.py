@@ -24,7 +24,7 @@ class FacebookPages(unittest.TestCase):
             createdAt=now.isoformat(),
         )
         with tempfile.TemporaryDirectory() as tmp, State(Path(tmp)) as store:
-            store.data["inboxSince"]["eden/facebook"] = (now - timedelta(hours=1)).isoformat()
+            store.data["inboxSince"]["eden/facebook/parent/page"] = (now - timedelta(hours=1)).isoformat()
             api, issues = Mock(), Mock()
             issues.ensure.return_value = 3
             api.get.side_effect = lambda path, **params: {"items": [item] if path == "/messages" else []}
@@ -50,7 +50,7 @@ class FacebookPages(unittest.TestCase):
         )
         def run(page):
             with tempfile.TemporaryDirectory() as tmp, State(Path(tmp)) as store:
-                store.data["inboxSince"]["eden/facebook"] = (now - timedelta(minutes=30)).isoformat()
+                store.data["inboxSince"]["eden/facebook/parent/eden-page"] = (now - timedelta(minutes=30)).isoformat()
                 api, issues, writer = Mock(), Mock(), Mock()
                 # A reply that passes validation, so only the Page check can stop the send.
                 writer.generate.return_value = "Happy to help! " + BOOKING

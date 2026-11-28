@@ -48,6 +48,25 @@ SUBMIT_AHEAD = timedelta(0)
 LATE_GRACE = timedelta(minutes=30)
 
 
+def record_confirmation(state, brand, shown, now):
+    """Keep each confirmed destination with the time it took effect, for the Monday digest.
+
+    A destination confirmed before this history existed is kept first, with no start time: it counts
+    from the beginning until the next confirmation of that feed. A later approval of a different
+    destination starts it at the moment the approval was applied (no post goes there earlier).
+    """
+    history = state.setdefault("destinationHistory", {}).setdefault(brand, {})
+    before = state.get("approvedDestinations", {}).get(brand, {})
+    for platform, dest in shown.items():
+        if not isinstance(dest, dict):
+            continue
+        entries = history.setdefault(platform, [])
+        if not entries and isinstance(before.get(platform), dict) and before[platform] != dest:
+            entries.append({"since": None, "destination": dict(before[platform])})
+        if not entries or entries[-1]["destination"] != dest:
+            entries.append({"since": now.isoformat() if entries else None, "destination": dict(dest)})
+
+
 def bound(shown, target):
     """The preview verified this destination and it carries the configured IDs."""
     return isinstance(shown, dict) and bool(shown.get("name")) and all(shown.get(k) == v for k, v in target.items())
@@ -91,10 +110,14 @@ def publish(
     if preview(batch) != issue_body:
         return
     if not approved:
-        if auto is not True or len(prior) < 2:
+        # A replacement preview promises a hold until its own approval, so autoPublish never sends it.
+        if batch.get("replaces") or auto is not True or len(prior) < 2:
             return
-        # An automatic week only goes to the destinations Hank last confirmed on his phone.
-        if any(shown.get(p) != confirmed.get(brand, {}).get(p) for p in batch["targets"]):
+        # An automatic week only goes to the destinations Hank last confirmed on his phone. Only the
+        # feeds this preview still owns are compared: a feed whose configured destination changed
+        # belongs to its replacement preview, and this one sends nothing there.
+        owned = [p for p in batch["targets"] if targets is None or targets.get(p) == batch["targets"][p]]
+        if any(shown.get(p) != confirmed.get(brand, {}).get(p) for p in owned):
             return "destinations"
     applied = state.setdefault("appliedApprovals", {}).setdefault(brand, [])
     if approved and token not in applied:
@@ -103,6 +126,7 @@ def publish(
         # expired slots have their own ledger.
         state["approvals"][brand] = sorted({*state["approvals"].get(brand, []), week})
         if shown:
+            record_confirmation(state, brand, shown, now)
             # A replacement preview confirms only the corrected destinations it names.
             confirmed[brand] = {**confirmed.get(brand, {}), **shown} if batch.get("replaces") else dict(shown)
         applied.append(token)

@@ -108,6 +108,49 @@ def identity(batch):
     return hashlib.sha256(encoded).hexdigest()[:24]
 
 
+def b98b864_preview(batch):
+    """The preview exactly as commit b98b864 rendered it: destination names with no Page or location
+    ID. A pending issue holding this text was approved for names only, so it gets a replacement
+    preview that shows the IDs (frozen copy; never edit it to match `preview`)."""
+    lines = [
+        f"## {BRANDS[batch['brand']]} · week of {batch['week']}",
+        "",
+        "Central Time. Each row is one feed post per listed destination. Tap a photo to inspect it.",
+        "",
+    ]
+    if "destinations" in batch:
+        names = {p: (d or {}).get("name") for p, d in batch["destinations"].items()}
+        lines += [
+            "**Destinations (as Blotato reports them)**",
+            "",
+            *[
+                f"- {LABELS[p]}: "
+                + (f"“{names[p]}”" if names.get(p) else "not verified, held: nothing is posted there this week")
+                for p in LABELS
+                if p in batch["targets"]
+            ],
+            "",
+            "Approving also confirms these are this brand’s accounts. The inbox for these accounts "
+            + ("(automatic replies included) " if batch["brand"] == "eden" else "")
+            + "starts only after that.",
+            "",
+        ]
+    for d in batch["days"]:
+        stamp = datetime.fromisoformat(d["time"]).strftime("%a %I:%M %p")
+        media = f"[Photo]({d['media']})" if d["media"] else "Instagram held · no cleared photo"
+        lines += [f"**{stamp}** · {', '.join(d['platforms'])} · {media}  ", d["text"], ""]
+    ctas = (
+        "Instagram ends with “Find your stay in the link in our bio.” Facebook ends with “Explore the stays: "
+        + BOOK
+        + "”"
+        if batch["brand"] == "eden"
+        else "Each caption ends with “Learn more at acaciaroofs.com.”"
+    )
+    return "\n".join(
+        lines + [ctas, "", f"Approve this exact week by commenting `/approve {identity(batch)}`."]
+    )
+
+
 def preview(batch):
     lines = [
         f"## {BRANDS[batch['brand']]} · week of {batch['week']}",

@@ -1,0 +1,136 @@
+{
+ "batch": {
+  "brand": "eden",
+  "days": [
+   {
+    "card": 7,
+    "media": "https://example.org/safe.jpg",
+    "platforms": [
+     "instagram",
+     "facebook"
+    ],
+    "source": {
+     "blob": "b",
+     "kind": "repo",
+     "path": "public/images/x-2.webp"
+    },
+    "text": "Sleep under canvas, about ten feet up. Who would you take to Pecan Haven?",
+    "time": "2099-11-30T19:30:00-06:00"
+   },
+   {
+    "card": 8,
+    "media": "https://example.org/safe.jpg",
+    "platforms": [
+     "instagram",
+     "facebook"
+    ],
+    "source": {
+     "blob": "b",
+     "kind": "repo",
+     "path": "public/images/x-2.webp"
+    },
+    "text": "Pack the book you keep meaning to finish. Cozy Tiny Home has a reading loft for a quiet chapter.",
+    "time": "2099-12-01T12:15:00-06:00"
+   },
+   {
+    "card": 9,
+    "media": "https://example.org/safe.jpg",
+    "platforms": [
+     "instagram",
+     "facebook"
+    ],
+    "source": {
+     "blob": "b",
+     "kind": "repo",
+     "path": "public/images/x-2.webp"
+    },
+    "text": "Start under the treetop shower. End in the hot tub. Which sounds better at Lunar Dome?",
+    "time": "2099-12-02T12:15:00-06:00"
+   },
+   {
+    "card": 10,
+    "media": "https://example.org/safe.jpg",
+    "platforms": [
+     "instagram",
+     "facebook"
+    ],
+    "source": {
+     "blob": "b",
+     "kind": "repo",
+     "path": "public/images/x-2.webp"
+    },
+    "text": "Yard games before dinner, a fire pit after. Bring up to six to Das Grun Haus.",
+    "time": "2099-12-03T19:30:00-06:00"
+   },
+   {
+    "card": 11,
+    "media": "https://example.org/safe.jpg",
+    "platforms": [
+     "instagram",
+     "facebook"
+    ],
+    "source": {
+     "blob": "b",
+     "kind": "repo",
+     "path": "public/images/x-2.webp"
+    },
+    "text": "Cowboy pool or soaking tub? At Treehouse Serenity Dome you can leave that decision for later.",
+    "time": "2099-12-04T19:30:00-06:00"
+   },
+   {
+    "card": 12,
+    "media": "https://example.org/safe.jpg",
+    "platforms": [
+     "instagram",
+     "facebook"
+    ],
+    "source": {
+     "blob": "b",
+     "kind": "repo",
+     "path": "public/images/x-2.webp"
+    },
+    "text": "Five bedrooms and a bunkroom at The Hidden Tavern. Who in your group will find the speakeasy first?",
+    "time": "2099-12-05T09:30:00-06:00"
+   },
+   {
+    "card": 13,
+    "media": "https://example.org/safe.jpg",
+    "platforms": [
+     "instagram",
+     "facebook"
+    ],
+    "source": {
+     "blob": "b",
+     "kind": "repo",
+     "path": "public/images/x-2.webp"
+    },
+    "text": "Bring the breakfast fixings. Walnut Horizon has a full kitchen, an observation deck and space for four.",
+    "time": "2099-12-06T19:30:00-06:00"
+   }
+  ],
+  "destinations": {
+   "facebook": {
+    "accountId": "fb",
+    "name": "Stay Eden",
+    "pageId": "page"
+   },
+   "instagram": {
+    "accountId": "ig",
+    "name": "@stayeden_fredericksburgtx"
+   }
+  },
+  "targets": {
+   "facebook": {
+    "accountId": "fb",
+    "pageId": "page"
+   },
+   "instagram": {
+    "accountId": "ig"
+   }
+  },
+  "week": "2099-11-30"
+ },
+ "body": "## Stay Eden · week of 2099-11-30\n\nCentral Time. Each row is one feed post per listed destination. Tap a photo to inspect it.\n\n**Destinations (as Blotato reports them)**\n\n- Instagram: “@stayeden_fredericksburgtx”\n- Facebook Page: “Stay Eden”\n\nApproving also confirms these are this brand’s accounts. The inbox for these accounts (automatic replies included) starts only after that.\n\n**Mon 07:30 PM** · instagram, facebook · [Photo](https://example.org/safe.jpg)  \nSleep under canvas, about ten feet up. Who would you take to Pecan Haven?\n\n**Tue 12:15 PM** · instagram, facebook · [Photo](https://example.org/safe.jpg)  \nPack the book you keep meaning to finish. Cozy Tiny Home has a reading loft for a quiet chapter.\n\n**Wed 12:15 PM** · instagram, facebook · [Photo](https://example.org/safe.jpg)  \nStart under the treetop shower. End in the hot tub. Which sounds better at Lunar Dome?\n\n**Thu 07:30 PM** · instagram, facebook · [Photo](https://example.org/safe.jpg)  \nYard games before dinner, a fire pit after. Bring up to six to Das Grun Haus.\n\n**Fri 07:30 PM** · instagram, facebook · [Photo](https://example.org/safe.jpg)  \nCowboy pool or soaking tub? At Treehouse Serenity Dome you can leave that decision for later.\n\n**Sat 09:30 AM** · instagram, facebook · [Photo](https://example.org/safe.jpg)  \nFive bedrooms and a bunkroom at The Hidden Tavern. Who in your group will find the speakeasy first?\n\n**Sun 07:30 PM** · instagram, facebook · [Photo](https://example.org/safe.jpg)  \nBring the breakfast fixings. Walnut Horizon has a full kitchen, an observation deck and space for four.\n\nInstagram ends with “Find your stay in the link in our bio.” Facebook ends with “Explore the stays: https://stayeden.netlify.app/stays/”\n\nApprove this exact week by commenting `/approve 7fa435e9c05b46dd9a75754c`.",
+ "rendered_by": "b98b864 social/planner.py preview()",
+ "token": "7fa435e9c05b46dd9a75754c"
+}

@@ -236,7 +236,7 @@ class FreshConversation(unittest.TestCase):
         now = datetime(2026, 11, 30, 12, tzinfo=CT)
         with tempfile.TemporaryDirectory() as tmp, State(Path(tmp)) as store:
             start = (now - timedelta(minutes=15)).isoformat()
-            store.data["inboxSince"].update({"eden": start, "eden/instagram": start})
+            store.data["inboxSince"].update({"eden": start, "eden/instagram/a": start})
             issues = Mock()
             issues.ensure.return_value = 4
             # Blotato imported nothing older; only the new question is retained.
@@ -250,7 +250,7 @@ class FreshConversation(unittest.TestCase):
         now = datetime(2026, 11, 30, 12, tzinfo=CT)
         with tempfile.TemporaryDirectory() as tmp, State(Path(tmp)) as store:
             start = (now - timedelta(minutes=15)).isoformat()
-            store.data["inboxSince"].update({"eden": start, "eden/instagram": start})
+            store.data["inboxSince"].update({"eden": start, "eden/instagram/a": start})
             issues = Mock()
             api, _ = self.run_inbox(store, now, [dm("new", "Are you available?", now)], now, issues)
             api.post.assert_called_once()
@@ -260,10 +260,13 @@ class FreshConversation(unittest.TestCase):
         now = datetime(2026, 11, 30, 12, tzinfo=CT)
         with tempfile.TemporaryDirectory() as tmp, State(Path(tmp)) as store:
             start = (now - timedelta(minutes=15)).isoformat()
-            store.data["inboxSince"].update({"eden": start, "eden/instagram": start})
+            store.data["inboxSince"].update({"eden": start, "eden/instagram/a": start})
             issues, state = Mock(), {"open": True}
             issues.ensure.return_value = 4
             issues.open.side_effect = lambda n: state["open"]
+            # Hank closes the handoff five minutes after it opened, before the follow-up (449r4 P0).
+            closed = (now + timedelta(minutes=5)).isoformat()
+            issues.closed_at.side_effect = lambda n: None if state["open"] else closed
             began = now - timedelta(minutes=1)
             refund = dm("1", "I need a host about my refund", now)
             self.run_inbox(store, now, [refund], began, issues)
@@ -293,7 +296,7 @@ class ZeroContactLimit(unittest.TestCase):
         now = datetime(2026, 11, 3, 12, tzinfo=CT)
         with tempfile.TemporaryDirectory() as tmp, State(Path(tmp)) as store:
             start = (now - timedelta(minutes=15)).isoformat()
-            store.data["inboxSince"].update({"eden": start, "eden/instagram": start})
+            store.data["inboxSince"].update({"eden": start, "eden/instagram/a": start})
             api, issues, writer = Mock(), Mock(), valid_writer()
             issues.ensure.return_value = 4
             api.post.return_value = {"id": "sent"}
@@ -419,7 +422,7 @@ class DestinationCursor(unittest.TestCase):
         question |= dict(platform="facebook", conversationId="fbthread", recipientId="page")
         with tempfile.TemporaryDirectory() as tmp, State(Path(tmp)) as store:
             start = (t0 - timedelta(minutes=15)).isoformat()
-            store.data["inboxSince"].update({"eden": start, "eden/instagram": start, "eden/facebook": start})
+            store.data["inboxSince"].update({"eden": start, "eden/instagram/a": start, "eden/facebook/fb/page": start})
             api, issues = Mock(), Mock()
             issues.ensure.return_value = 5
             feed = {"facebook": []}

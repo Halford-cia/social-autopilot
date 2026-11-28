@@ -305,7 +305,7 @@ class ConversationContext(unittest.TestCase):
         now = datetime(2026, 11, 30, 12, tzinfo=CT)
         new = dm("new", "Are you available?", now)
         with tempfile.TemporaryDirectory() as tmp, State(Path(tmp)) as store:
-            store.data["inboxSince"]["eden/instagram"] = (now - timedelta(minutes=15)).isoformat()
+            store.data["inboxSince"]["eden/instagram/a"] = (now - timedelta(minutes=15)).isoformat()
             api, issues, writer = Mock(), Mock(), valid_writer()
             issues.ensure.return_value = 4
             api.post.return_value = {"id": "sent"}
@@ -344,7 +344,7 @@ class ContactBudget(unittest.TestCase):
     def test_reply_budget_counts_distinct_contacts_and_holds_the_rest(self):
         now = datetime(2026, 11, 30, 12, tzinfo=CT)
         with tempfile.TemporaryDirectory() as tmp, State(Path(tmp)) as store:
-            store.data["inboxSince"]["eden/instagram"] = (now - timedelta(minutes=15)).isoformat()
+            store.data["inboxSince"]["eden/instagram/a"] = (now - timedelta(minutes=15)).isoformat()
             api, issues, writer = Mock(), Mock(), valid_writer()
             issues.ensure.return_value = 4
             api.post.return_value = {"id": "sent"}
@@ -373,7 +373,7 @@ class ContactBudget(unittest.TestCase):
     def test_uncertain_send_keeps_its_reservation(self):
         now = datetime(2026, 11, 30, 12, tzinfo=CT)
         with tempfile.TemporaryDirectory() as tmp, State(Path(tmp)) as store:
-            store.data["inboxSince"]["eden/instagram"] = (now - timedelta(minutes=15)).isoformat()
+            store.data["inboxSince"]["eden/instagram/a"] = (now - timedelta(minutes=15)).isoformat()
             api, issues = Mock(), Mock()
             message = dm("1", "How do I book?", now, "c1", "guest-1")
             api.get.side_effect = lambda path, **p: (

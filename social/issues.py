@@ -50,6 +50,11 @@ class Issues:
     def open(self, number):
         return self.api(f"{self.base}/issues/{int(number)}")["state"] == "open"
 
+    def closed_at(self, number):
+        """When the issue was last closed (GitHub's ISO time), or None while it is open."""
+        issue = self.api(f"{self.base}/issues/{int(number)}")
+        return issue.get("closed_at") if issue["state"] == "closed" else None
+
     def read(self, number):
         """Issue body and comments, each with the author's numeric ID and whether anyone edited it.
 
