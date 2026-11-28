@@ -36,6 +36,10 @@ class Boundaries(unittest.TestCase):
             api, issues = Mock(), Mock()
             api.get.return_value = {"items": []}
             issues.ensure.return_value = 1
+            # Hank has confirmed the destinations, so the digest is not waiting for them (449r3 P1-4).
+            store.data["approvedDestinations"] = {
+                "eden": {p: dict(d, name=p) for p, d in cfg["brands"]["eden"]["targets"].items()}
+            }
             with (
                 patch("social.runtime.check_destinations", return_value=({}, [])),
                 patch("social.runtime.check"),

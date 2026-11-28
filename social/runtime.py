@@ -12,7 +12,7 @@ from .claude import RunLimit, validate_limits
 from .digest import bounds, digest
 from .inbox import route
 from .media import media_picker, recheck_company, recheck_repo
-from .planner import BRANDS, CT, LABELS, caption, plan, preview, verify_copy
+from .planner import BRANDS, CT, LABELS, caption, current_format, identity, plan, preview, replacement, verify_copy
 from .sources import check, refresh_repo
 from .workflow import publish
 from .writing import reply_text, write_week
@@ -265,6 +265,34 @@ def linked_handoffs(holds, key):
     return [found] if isinstance(found, int) else list(found)
 
 
+def inbox_key(brand, platform, dest):
+    """Cursor and inbox start belong to one verified destination: a replacement account or Page
+    starts its own inbox, and the same destination recovering from an outage keeps its cursor."""
+    return "/".join([brand, platform, dest["accountId"]] + ([dest["pageId"]] if dest.get("pageId") else []))
+
+
+def thread_replies(api, platform, dest, item):
+    """True when the public thread under this top-level comment has any reply, or cannot be read.
+
+    A reply is a guest's clarification (which may change the question) or a person answering; either
+    way the thread is not a simple question any more. Blotato lists direct replies by parent ID.
+    """
+    try:
+        for row in pages(
+            api.get,
+            "/comments",
+            parentCommentId=item["id"],
+            platform=platform,
+            accountId=dest["accountId"],
+            limit=250,
+        ):
+            if row.get("id") != item["id"]:
+                return True
+        return False
+    except (RemoteError, KeyError, TypeError, ValueError):
+        return True
+
+
 def process_inbox(brand, targets, store, now, api, issues, writer, contact_limits=None):
     state = store.data
     contacts = Contacts(contact_limits, store, now)
@@ -274,7 +302,14 @@ def process_inbox(brand, targets, store, now, api, issues, writer, contact_limit
     for platform, dest in targets.items():
         if platform == "googlebusiness":
             continue
-        key = brand + "/" + platform
+        key = inbox_key(brand, platform, dest)
+        legacy = brand + "/" + platform
+        if key not in cursors and legacy in cursors:
+            # A ledger from before cursors were keyed by destination: it belongs to the destination
+            # in use when this version starts, so that one keeps its cursor and start.
+            cursors[key] = cursors.pop(legacy)
+            starts[key] = starts.pop(legacy, cursors[key])
+            store.save()
         if key not in cursors:
             # A destination's first eligible cycle only records its start time. Anything that
             # arrived earlier is answered by hand in Blotato.
@@ -349,6 +384,26 @@ def process_inbox(brand, targets, store, now, api, issues, writer, contact_limit
                         continue
                 thread_key, cleared = None, False
                 holds = state.setdefault("threads", {})
+                if kind == "comments":
+                    # One public thread: a top-level comment and its direct replies.
+                    root = item.get("parentCommentId") or item["id"]
+                    thread_key = event_ref(brand, platform + "/comments", root)
+                    if action == "send":
+                        owner = next((n for n in linked_handoffs(holds, thread_key) if issues.open(n)), None)
+                        if owner is not None:
+                            # Someone in this thread was already handed to the host.
+                            state["events"][ref] = {
+                                "brand": brand,
+                                "kind": kind,
+                                "platform": platform,
+                                "time": item["createdAt"],
+                                "status": "human",
+                                "issue": owner,
+                            }
+                            store.save()
+                            continue
+                        if thread_replies(api, platform, dest, item):
+                            action, payload = "human", None
                 if kind == "messages" and item.get("conversationId"):
                     thread_key = event_ref(brand, platform, item["conversationId"])
                     linked = linked_handoffs(holds, thread_key)
@@ -557,70 +612,114 @@ def weekly(brand, cfg, store, now, api, issues, writer, resolved=None):
         record = records.get(brand + "/" + week.isoformat())
         if not record or "batch" not in record:
             continue
-        batch = record["batch"]
-        verify_copy(batch)
-        if batch["brand"] != brand or batch["week"] != week.isoformat() or batch["targets"] != targets:
-            raise ValueError("Pending batch destinations changed; review original batch")
-        check(
-            brand,
-            cfg,
-            [caption(brand, day, p) for day in batch["days"] for p in day["platforms"]],
-            live=True,
-        )
-        body = preview(batch)
-        if "issue" not in record:
-            record["issue"] = notice(issues, BRANDS[brand] + " · approve " + week.isoformat(), body)
+        for batch, holder, title in previews(brand, week.isoformat(), record, targets, resolved, store):
+            publish_preview(brand, cfg, store, now, api, issues, batch, holder, title, resolved)
+
+
+def previews(brand, week, record, targets, resolved, store):
+    """The previews that may post this week: the saved one, and a replacement for any destination
+    whose configured IDs changed since it was saved (all of them for a batch saved in the round-two
+    format, which bound only names). A replacement keeps the week's receipts and needs its own
+    approval; the saved preview keeps posting to the destinations that did not change."""
+    batch = record["batch"]
+    if batch["brand"] != brand or batch["week"] != week:
+        raise ValueError("Pending batch does not match its week; review original batch")
+    legacy = resolved is not None and not current_format(batch)
+    changed = sorted(set(targets) if legacy else {p for p in targets if batch["targets"].get(p) != targets[p]})
+    if changed and resolved is None:
+        raise ValueError("Pending batch destinations changed; review original batch")
+    out = [] if legacy else [(batch, record, BRANDS[brand] + " · approve " + week)]
+    if changed:
+        want = {p: targets[p] for p in changed}
+        held = record.get("replacement")
+        if (
+            not held
+            or held["batch"]["targets"] != want
+            or any(p in resolved and p not in held["batch"]["destinations"] for p in want)
+        ):
+            # New or corrected again, or a destination verified only now: a fresh preview and token.
+            held = {"batch": replacement(batch, want, resolved)}
+            record["replacement"] = held
             store.save()
-        issue_body, comments = issues.read(record["issue"])
-        recheck = source_checker(brand, cfg)
-        outcome = publish(
-            batch,
-            store.data,
-            store.save,
-            now,
-            block["autoPublish"],
-            cfg["approverId"],
-            issue_body,
-            comments,
-            lambda payload: api.post("/posts", payload),
-            clock=lambda: datetime.now(CT),
-            current=resolved,
-            recheck=recheck,
+        token = identity(held["batch"])
+        out.append((held["batch"], held, f"{BRANDS[brand]} · approve {week} · corrected destinations {token[:8]}"))
+    return out
+
+
+def publish_preview(brand, cfg, store, now, api, issues, batch, record, title, resolved):
+    block = cfg["brands"][brand]
+    verify_copy(batch)
+    check(
+        brand,
+        cfg,
+        [caption(brand, day, p) for day in batch["days"] for p in day["platforms"]],
+        live=True,
+    )
+    body = preview(batch)
+    if "issue" not in record:
+        record["issue"] = notice(issues, title, body)
+        store.save()
+    issue_body, comments = issues.read(record["issue"])
+    recheck = source_checker(brand, cfg)
+    outcome = publish(
+        batch,
+        store.data,
+        store.save,
+        now,
+        block["autoPublish"],
+        cfg["approverId"],
+        issue_body,
+        comments,
+        lambda payload: api.post("/posts", payload),
+        clock=lambda: datetime.now(CT),
+        current=resolved,
+        recheck=recheck,
+        targets=block["targets"],
+    )
+    if recheck.failed:
+        notice(
+            issues,
+            f"{BRANDS[brand]} · photo source · {now.astimezone(CT).date()} needs attention",
+            f"A photo's source could not be checked ({recheck.failed[0]}), so its posts were not "
+            "submitted this cycle. They wait for a later cycle and expire if their slot passes.",
         )
-        if recheck.failed:
-            notice(
-                issues,
-                f"{BRANDS[brand]} · photo source · {now.astimezone(CT).date()} needs attention",
-                f"A photo's source could not be checked ({recheck.failed[0]}), so its posts were not "
-                "submitted this cycle. They wait for a later cycle and expire if their slot passes.",
-            )
-        if outcome == "destinations":
-            notice(
-                issues,
-                BRANDS[brand] + " · approve " + week.isoformat() + " · destinations changed",
-                "This week was not scheduled automatically: its destinations differ from the ones you last "
-                "approved. Check the names in the preview, then approve it there if they are right.",
-            )
+    if outcome == "destinations":
+        notice(
+            issues,
+            title + " · destinations changed",
+            "This week was not posted automatically: its destinations differ from the ones you last "
+            "approved. Check the names and IDs in the preview, then approve it there if they are right.",
+        )
 
 
 def digest_targets(brand, store, week):
     """The destinations posts went to that week, independent of this cycle's lookups.
 
-    The week's own preview names them; failing that, the destinations Hank last confirmed.
+    Per platform: the week's corrected-destination preview, else the week's own preview, else the
+    destination Hank last confirmed.
     """
     record = store.data["batches"].get(brand + "/" + week) or {}
-    shown = (record.get("batch") or {}).get("destinations")
-    if shown is None:
-        shown = store.data.get("approvedDestinations", {}).get(brand, {})
-    return {p: d for p, d in shown.items() if isinstance(d, dict)}
+    out = dict(store.data.get("approvedDestinations", {}).get(brand, {}))
+    for held in (record, record.get("replacement") or {}):
+        out.update((held.get("batch") or {}).get("destinations") or {})
+    return {p: d for p, d in out.items() if isinstance(d, dict)}
+
+
+MEASURED = ("instagram", "facebook")
 
 
 def monday_digest(brand, store, now, api, issues):
+    """The digest waits while an IG/FB destination is still unknown (no preview named it and Hank has
+    not confirmed it), so the first Monday does not close an empty report before the first approval.
+    By Sunday it is posted anyway, marked partial, naming what could not be measured."""
     local = now.astimezone(CT).date()
     previous = (local - timedelta(days=local.weekday() + 7)).isoformat()
     digest_key = brand + "/" + previous
     if digest_key not in store.data["digests"]:
         targets = digest_targets(brand, store, previous)
+        missing = [p for p in MEASURED if p not in targets]
+        if missing and local.weekday() < 6:
+            return
         lo, hi = bounds(previous)
         rows = pages(
             api.get,
@@ -630,6 +729,12 @@ def monday_digest(brand, store, now, api, issues):
             until=(hi - timedelta(milliseconds=1)).isoformat(),
         )
         report = digest(brand, previous, targets, rows)
+        if missing:
+            report += (
+                "\n\nPartial: not measured: "
+                + ", ".join(LABELS[p] for p in missing)
+                + ". No preview named it that week and it was not confirmed by Sunday."
+            )
         store.data["digests"][digest_key] = notice(issues, BRANDS[brand] + " · digest " + previous, report)
         store.save()
 

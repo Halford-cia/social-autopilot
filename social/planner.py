@@ -18,6 +18,33 @@ ANCHOR = date(2026, 11, 30)
 LABELS = {"instagram": "Instagram", "facebook": "Facebook Page", "googlebusiness": "Google Business Profile"}
 
 
+def channels(brand, url):
+    """The feeds a day's post goes to: Instagram needs a photo."""
+    return (["instagram"] if url else []) + ["facebook"] + (["googlebusiness"] if brand == "acacia" else [])
+
+
+def current_format(batch):
+    """A batch whose preview bound each verified destination to its IDs (449r2 and later)."""
+    shown = batch.get("destinations")
+    return isinstance(shown, dict) and all(isinstance(d, dict) for d in shown.values())
+
+
+def replacement(batch, targets, destinations):
+    """A new preview for the destinations whose configured IDs changed (or for a whole batch saved in
+    an older format). It keeps the week's captions, times and photos, lists only those destinations,
+    and carries its own approval token. Rows already sent for this week stay in the ledger."""
+    dests = json.loads(json.dumps({p: destinations[p] for p in targets if p in destinations}))
+    days = [dict(d, platforms=[p for p in channels(batch["brand"], d["media"]) if p in dests]) for d in batch["days"]]
+    return dict(
+        brand=batch["brand"],
+        week=batch["week"],
+        targets=json.loads(json.dumps(targets)),
+        days=days,
+        destinations=dests,
+        replaces=identity(batch),
+    )
+
+
 def plan(brand, start, media, targets=None, *, compose=None, destinations=None):
     if start.weekday() != 0 or brand not in CARDS:
         raise ValueError("Expected a brand and a Monday in Central Time")
@@ -35,9 +62,7 @@ def plan(brand, start, media, targets=None, *, compose=None, destinations=None):
         picked = media(source)
         # A picker returns the hosted URL plus a private source reference for the pre-send recheck.
         url, origin = (picked["url"], picked["source"]) if isinstance(picked, dict) else (picked, None)
-        platforms = (["instagram"] if url else []) + ["facebook"]
-        if brand == "acacia":
-            platforms.append("googlebusiness")
+        platforms = channels(brand, url)
         if destinations is not None:
             # A destination Blotato could not verify is held for the whole week: no row lists it.
             platforms = [p for p in platforms if p in destinations]
@@ -51,9 +76,10 @@ def plan(brand, start, media, targets=None, *, compose=None, destinations=None):
                 time=datetime.combine(day, time(*TIMES[brand][i]), CT).isoformat(),
             )
         )
-    batch = dict(brand=brand, week=start.isoformat(), targets=targets or {}, days=days)
+    # Copies: the saved batch never shares a dict with the live config or this cycle's lookups.
+    batch = dict(brand=brand, week=start.isoformat(), targets=json.loads(json.dumps(targets or {})), days=days)
     if destinations is not None:
-        batch["destinations"] = dict(destinations)
+        batch["destinations"] = json.loads(json.dumps(destinations))
     return batch
 
 
@@ -89,18 +115,27 @@ def preview(batch):
         "Central Time. Each row is one feed post per listed destination. Tap a photo to inspect it.",
         "",
     ]
+    if batch.get("replaces"):
+        lines += [
+            "**Corrected destinations for this week.** Only the destinations listed below are posted from "
+            "this preview, from its approval on. Posts already sent this week stay as they are, and the "
+            "week’s other destinations keep their earlier approval.",
+            "",
+        ]
     if "destinations" in batch:
-        # The names Blotato reports for the configured IDs, so a swapped account shows here.
-        names = {p: (d or {}).get("name") for p, d in batch["destinations"].items()}
+        # The names Blotato reports for the configured IDs, so a swapped account shows here. The Page
+        # or location ID tells identically named destinations apart.
+        def shown(p):
+            d = batch["destinations"].get(p)
+            if not isinstance(d, dict) or not d.get("name"):
+                return "not verified, held: nothing is posted there this week"
+            ref = {"facebook": ("Page ID", "pageId"), "googlebusiness": ("location", "locationId")}.get(p)
+            return f"“{d['name']}”" + (f" ({ref[0]} `{d.get(ref[1])}`)" if ref else "")
+
         lines += [
             "**Destinations (as Blotato reports them)**",
             "",
-            *[
-                f"- {LABELS[p]}: "
-                + (f"“{names[p]}”" if names.get(p) else "not verified, held: nothing is posted there this week")
-                for p in LABELS
-                if p in batch["targets"]
-            ],
+            *[f"- {LABELS[p]}: " + shown(p) for p in LABELS if p in batch["targets"]],
             "",
             "Approving also confirms these are this brand’s accounts. The inbox for these accounts "
             + ("(automatic replies included) " if batch["brand"] == "eden" else "")
@@ -110,7 +145,8 @@ def preview(batch):
     for d in batch["days"]:
         stamp = datetime.fromisoformat(d["time"]).strftime("%a %I:%M %p")
         media = f"[Photo]({d['media']})" if d["media"] else "Instagram held · no cleared photo"
-        lines += [f"**{stamp}** · {', '.join(d['platforms'])} · {media}  ", d["text"], ""]
+        where = ", ".join(d["platforms"]) or "no destination (held)"
+        lines += [f"**{stamp}** · {where} · {media}  ", d["text"], ""]
     ctas = (
         "Instagram ends with “Find your stay in the link in our bio.” Facebook ends with “Explore the stays: "
         + BOOK

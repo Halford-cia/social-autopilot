@@ -66,10 +66,8 @@ def blotato(page_names, *, posts=(), subaccounts_fail=False):
         return {"items": []}
 
     api.get.side_effect = get
-    api.post.side_effect = lambda path, body: {
-        "postSubmissionId": "s-" + body["scheduledTime"],
-        "scheduledTime": body["scheduledTime"],
-    }
+    # Rows are sent as their slot comes due and publish immediately: no scheduledTime (449r3 P0-1).
+    api.post.side_effect = lambda path, body: {"postSubmissionId": "s-" + str(api.post.call_count)}
     return api
 
 
@@ -355,20 +353,22 @@ class QueuedAfterChange(unittest.TestCase):
                 123,
                 preview(batch),
                 [],
-                lambda body: sent.append(body) or {"postSubmissionId": "x", "scheduledTime": body["scheduledTime"]},
+                lambda body: sent.append(body) or {"postSubmissionId": "x"},
                 clock=lambda: now,
                 current=dests(),
                 recheck=lambda _: "ok",
             )
 
+        # 449r3 P0-1: rows go out when their slot arrives, so the Friday checks run at 7:30 p.m.
+        friday = ["eden/2026-12-18/instagram", "eden/2026-12-18/facebook"]
         tick(datetime(2026, 12, 13, 12, tzinfo=CT), True)  # Sunday: the week is prepared
         tick(datetime(2026, 12, 15, 9, tzinfo=CT), False)  # Tuesday: the switch goes off
-        tick(datetime(2026, 12, 18, 17, tzinfo=CT), False)  # Friday, 2 h 30 before 7:30 p.m.
-        self.assertFalse([b for b in sent if b["scheduledTime"].startswith("2026-12-18")])
-        control = []
-        sent = control
-        tick(datetime(2026, 12, 18, 17, tzinfo=CT), True)  # with the switch on it goes
-        self.assertTrue(any(b["scheduledTime"].startswith("2026-12-18") for b in control))
+        tick(datetime(2026, 12, 18, 19, 30, tzinfo=CT), False)  # Friday's 7:30 p.m. slot
+        self.assertEqual(sent, [])
+        self.assertFalse([k for k in friday if k in state["writes"]])
+        tick(datetime(2026, 12, 18, 19, 30, tzinfo=CT), True)  # with the switch on it goes
+        self.assertEqual(len(sent), 2)
+        self.assertEqual({state["writes"][k]["status"] for k in friday}, {"accepted"})
 
     def test_photo_withdrawn_on_tuesday_holds_fridays_rows(self):
         targets = {
@@ -393,7 +393,7 @@ class QueuedAfterChange(unittest.TestCase):
                 123,
                 preview(batch),
                 [comment],
-                lambda body: sent.append(body) or {"postSubmissionId": "x", "scheduledTime": body["scheduledTime"]},
+                lambda body: sent.append(body) or {"postSubmissionId": "x"},
                 clock=lambda: now,
                 current=dests(targets, names),
                 recheck=lambda day: photo["verdict"],
@@ -402,8 +402,8 @@ class QueuedAfterChange(unittest.TestCase):
         tick(datetime(2026, 12, 13, 12, tzinfo=CT))
         photo["verdict"] = "held"  # the PM removes the tag on Tuesday
         tick(datetime(2026, 12, 15, 9, tzinfo=CT))
-        tick(datetime(2026, 12, 18, 8, tzinfo=CT))  # Friday 10:00 a.m. slot is 2 h away
-        self.assertFalse([b for b in sent if b["scheduledTime"].startswith("2026-12-18")])
+        tick(datetime(2026, 12, 18, 10, tzinfo=CT))  # Friday's 10:00 a.m. slot (449r3: sent at the slot)
+        self.assertEqual(sent, [])
         friday = {k: r["status"] for k, r in state["writes"].items() if "2026-12-18" in k}
         self.assertEqual(set(friday.values()), {"held"})
         self.assertEqual(len(friday), 3)

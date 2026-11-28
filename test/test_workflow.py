@@ -82,7 +82,8 @@ class Workflow(unittest.TestCase):
 
     def test_two_approved_weeks_count_even_if_first_slots_have_passed(self):
         def send(body):
-            return {"postSubmissionId": "test", "scheduledTime": body["scheduledTime"]}
+            # A slot sent as it comes due publishes immediately and has no scheduledTime (449r3).
+            return {"postSubmissionId": "test", **({"scheduledTime": body["scheduledTime"]} if "scheduledTime" in body else {})}
 
         for day in (date(2026, 11, 30), date(2026, 12, 7)):
             batch = plan("eden", day, lambda _: None, TARGETS, destinations=DESTS)

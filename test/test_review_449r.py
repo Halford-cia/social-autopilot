@@ -232,8 +232,9 @@ class DestinationIdentity(unittest.TestCase):
                 self.assertEqual(store.data["inboxSince"], {})
                 store.data["approvedDestinations"] = {"eden": dict(DESTS)}
                 tick_brand("eden", eden_cfg(), store, now, api, issues, valid_writer())
-                self.assertIn("eden/instagram", store.data["inboxSince"])
-                self.assertIn("eden/facebook", store.data["inboxSince"])
+                # Cursors are keyed by the verified destination IDs (449r3 P1-3).
+                self.assertIn("eden/instagram/ig", store.data["inboxSince"])
+                self.assertIn("eden/facebook/fb/page", store.data["inboxSince"])
                 # A destination renamed or swapped since the approval pauses the inbox again.
                 store.data["approvedDestinations"] = {"eden": renamed("facebook", "Other Page")}
                 api.get.reset_mock()
@@ -393,8 +394,16 @@ class ContactBudget(unittest.TestCase):
 
         cfg = load_example()
         self.assertEqual(set(cfg["blotato"]), set(BUDGET))
+        # The negative case starts from a config that passes, so only the budget can reject it
+        # (449r3 P1-5: the example's approverId 0 used to reject it on its own).
+        cfg["approverId"] = 123
+        for brand, block in cfg["brands"].items():
+            for platform, dest in block["targets"].items():
+                for key in dest:
+                    dest[key] = f"{brand}-{platform}-{key}"
+        validate_config(cfg)
         cfg["blotato"]["contactChargeLimitCents"] = -1
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, "Blotato contact budget"):
             validate_config(cfg)
 
 
@@ -630,8 +639,8 @@ class DisconnectedDestination(unittest.TestCase):
                 tick_brand("acacia", cfg, store, now, api, issues, valid_writer())
             titles = [c.args[0] for c in issues.ensure.call_args_list]
             self.assertTrue(any("Google Business" in t for t in titles))
-            self.assertIn("acacia/instagram", store.data["inboxSince"])
-            self.assertIn("acacia/facebook", store.data["inboxSince"])
+            self.assertIn("acacia/instagram/ig", store.data["inboxSince"])  # keyed by destination IDs (449r3)
+            self.assertIn("acacia/facebook/fb/page", store.data["inboxSince"])
             self.assertTrue(any("check delivery" in t for t in titles))
 
 

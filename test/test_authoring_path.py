@@ -60,7 +60,10 @@ class AuthoringPath(unittest.TestCase):
             template | dict(id="2", text="What time is check-in?"),
             template | dict(id="3", text="Where are you located?"),
         ]
-        self.api.get.side_effect = lambda path, **_: {"items": records if path == "/comments" else []}
+        # The feed lists the three questions; none has a reply under it (Blotato's parentCommentId filter).
+        self.api.get.side_effect = lambda path, **p: {
+            "items": records if path == "/comments" and "parentCommentId" not in p else []
+        }
         self.api.post.return_value = {"id": "accepted"}
         self.writer.generate.side_effect = ["Happy to help! " + BOOKING, "We confirm your dates."]
         for brand in ("eden", "acacia"):
