@@ -51,8 +51,48 @@ class Issues:
         return self.api(f"{self.base}/issues/{int(number)}")["state"] == "open"
 
     def read(self, number):
-        issue = self.api(f"{self.base}/issues/{int(number)}")
-        if issue["user"]["id"] != self.actor or issue["state"] != "open":
-            return "", []
-        pages = self.api(f"{self.base}/issues/{int(number)}/comments?per_page=100", paginate=True)
-        return issue["body"], [c for page in pages for c in page]
+        """Issue body and comments, each with the author's numeric ID and whether anyone edited it.
+
+        REST comments expose no editor, so moderators' edits are read from GraphQL. A comment counts
+        as unedited only when GitHub reports no edit time, no editor and no creation edit.
+        """
+        owner, name = self.base.split("/")[1:3]
+        comments, cursor, body = [], None, ""
+        for _ in range(50):
+            data = self.api(
+                "graphql",
+                {"query": READ, "variables": dict(owner=owner, name=name, number=int(number), after=cursor)},
+            )
+            if data.get("errors"):
+                raise RuntimeError("GitHub operation failed")
+            issue = data["data"]["repository"]["issue"]
+            if (issue.get("author") or {}).get("databaseId") != self.actor or issue["state"] != "OPEN":
+                return "", []
+            body = issue["body"]
+            block = issue["comments"]
+            for c in block["nodes"]:
+                comments.append(
+                    {
+                        "user": {"id": (c.get("author") or {}).get("databaseId")},
+                        "body": c.get("body") or "",
+                        "createdAt": c.get("createdAt"),
+                        "edited": not (
+                            c.get("lastEditedAt") is None
+                            and c.get("editor") is None
+                            and c.get("includesCreatedEdit") is False
+                        ),
+                    }
+                )
+            if not block["pageInfo"]["hasNextPage"]:
+                return body, comments
+            cursor = block["pageInfo"]["endCursor"]
+        raise RuntimeError("GitHub operation failed")
+
+
+ACTOR = "...on User{databaseId} ...on Bot{databaseId}"
+READ = (
+    "query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name)"
+    "{issue(number:$number){body state author{" + ACTOR + "} comments(first:100,after:$after)"
+    "{pageInfo{hasNextPage endCursor} nodes{body createdAt lastEditedAt includesCreatedEdit"
+    " editor{login} author{" + ACTOR + "}}}}}}"
+)

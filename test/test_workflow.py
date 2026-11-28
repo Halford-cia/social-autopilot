@@ -18,7 +18,7 @@ class Workflow(unittest.TestCase):
         self.batch = plan("eden", D, lambda _: "https://example.org/safe.jpg", TARGETS)
         self.state = {"approvals": {}, "writes": {}}
         self.calls = []
-        self.manual = {"user": {"id": 123}, "body": "/approve " + identity(self.batch)}
+        self.manual = {"user": {"id": 123}, "body": "/approve " + identity(self.batch), "edited": False}
 
     def run_batch(self, comments=(), auto=False, body=None, sink=None):
         def send(payload):
@@ -80,7 +80,7 @@ class Workflow(unittest.TestCase):
 
         for day in (date(2026, 11, 30), date(2026, 12, 7)):
             batch = plan("eden", day, lambda _: None, TARGETS)
-            manual = [{"user": {"id": 123}, "body": "/approve " + identity(batch)}]
+            manual = [{"user": {"id": 123}, "body": "/approve " + identity(batch), "edited": False}]
             late = datetime.fromisoformat(batch["days"][1]["time"])
             publish(batch, self.state, lambda: None, late, False, 123, preview(batch), manual, send)
         self.assertEqual(self.state["approvals"]["eden"], ["2026-11-30", "2026-12-07"])

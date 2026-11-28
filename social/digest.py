@@ -33,7 +33,8 @@ def digest(brand, week, targets, rows):
             follows.append(int(count))
         reach = snapshot.get("reachCount")
         if isinstance(reach, (str, int)) and str(reach).isdecimal():
-            measured.append((int(reach), platform, row["id"], row["postTime"][:10]))
+            local_day = datetime.fromisoformat(row["postTime"]).astimezone(CT).date().isoformat()
+            measured.append((int(reach), platform, row["id"], local_day))
     measured.sort(reverse=True)
     label = f"{sum(r[0] for r in measured):,}" if measured else "unavailable"
     lines = [

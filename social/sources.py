@@ -17,13 +17,20 @@ def validate_sources(name, data):
         raise ValueError(f"Review updated {name} source before publishing")
 
 
-def git_bytes(repo, path):
-    return subprocess.run(
-        ["git", "-C", str(Path(repo).expanduser()), "show", "origin/main:" + path],
-        check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-    ).stdout
+def blob_sha(data):
+    return hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
+
+
+def git_bytes(repo, path, *, missing_ok=False):
+    """Read path at origin/main. With missing_ok, an absent file is None; a broken repo still raises."""
+    git = ["git", "-C", str(Path(repo).expanduser())]
+    quiet = dict(stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    if missing_ok:
+        subprocess.run([*git, "rev-parse", "--verify", "--quiet", "origin/main^{commit}"], check=True, **quiet)
+        listing = subprocess.run([*git, "ls-tree", "-z", "origin/main", "--", path], check=True, **quiet).stdout
+        if listing.split(b"\t", 1)[0].split(b" ")[1:2] != [b"blob"]:
+            return None
+    return subprocess.run([*git, "show", "origin/main:" + path], check=True, **quiet).stdout
 
 
 def check_remote_blob(path, data):
@@ -31,7 +38,7 @@ def check_remote_blob(path, data):
     head = subprocess.check_output(
         ["gh", "api", endpoint, "--jq", ".sha"], stderr=subprocess.DEVNULL, timeout=30
     )
-    blob = hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
+    blob = blob_sha(data)
     if head.decode().strip() != blob:
         raise ValueError("Local source differs from current upstream main")
 

@@ -36,8 +36,19 @@ class DemoWriter:
         return json.dumps(captions)
 
 
+DEMO_DESTINATIONS = {
+    "eden": {"instagram": "@fixture_stay_eden", "facebook": "Stay Eden (fixture Page)"},
+    "acacia": {
+        "instagram": "@fixture_acacia_roofing",
+        "facebook": "Acacia Roofing (fixture Page)",
+        "googlebusiness": "Acacia Roofing (fixture location)",
+    },
+}
+
+
 def demo(start):
     blocks = ["# Mock week · offline preview", "All media and destinations in this example are fixtures."]
+    targets = load_example()["brands"]
     for brand in BRANDS:
         images = iter(range(1, 8))
         batch = plan(
@@ -46,7 +57,9 @@ def demo(start):
             lambda _, brand=brand, images=images: (
                 f"https://media.example.invalid/mock-{brand}-{next(images)}.jpg"
             ),
+            targets[brand]["targets"],
             compose=lambda b, w, cards: write_week(b, w, cards, DemoWriter()),
+            destinations=DEMO_DESTINATIONS[brand],
         )
         blocks.append(preview(batch))
     return "\n\n".join(blocks)

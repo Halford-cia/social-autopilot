@@ -1,1 +1,2 @@
 Pillow==13.0.0
+pyobjc-framework-Vision==13.1

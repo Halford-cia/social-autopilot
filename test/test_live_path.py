@@ -10,6 +10,9 @@ from unittest.mock import Mock, patch
 from PIL import Image
 
 from social.cli import DemoWriter, load_example
+from social.inbox import BOOKING
+
+BUDGET = {"contactChargeLimitCents": 100, "contactChargeCents": 2, "billingPeriodDay": 1}
 from social.media import FLAGS, candidate_url, sanitize
 from social.planner import CT, identity
 from social.runtime import State, process_inbox, tick_brand
@@ -44,10 +47,13 @@ class LivePath(unittest.TestCase):
 
             def get(path, **params):
                 if path.endswith("subaccounts"):
-                    return {"items": [dict(accountId="fb", id="p")]}
+                    return {"items": [dict(accountId="fb", id="p", name="Stay Eden")]}
                 if path.endswith("/accounts"):
                     return {
-                        "items": [dict(id="ig", platform="instagram"), dict(id="fb", platform="facebook")]
+                        "items": [
+                            dict(id="ig", platform="instagram", username="stayeden"),
+                            dict(id="fb", platform="facebook", username=""),
+                        ]
                     }
                 if path.startswith("/posts/"):
                     return dict(status="scheduled")
@@ -59,7 +65,14 @@ class LivePath(unittest.TestCase):
             )
             with (
                 patch("social.runtime.check"),
-                patch("social.runtime.media_picker", return_value=lambda _: "https://example.org/safe.jpg"),
+                patch(
+                    "social.runtime.media_picker",
+                    return_value=lambda _: {
+                        "url": "https://example.org/safe.jpg",
+                        "source": {"kind": "repo", "path": "public/images/x-2.webp", "blob": "b"},
+                    },
+                ),
+                patch("social.runtime.recheck_repo", return_value="ok") as recheck,
             ):
                 issues.read.return_value = ("", [])
                 tick_brand("eden", cfg, store, now, api, issues, DemoWriter())
@@ -70,36 +83,50 @@ class LivePath(unittest.TestCase):
                 cmd = "/approve " + identity(record["batch"])
                 issues.read.return_value = (
                     preview(record["batch"]),
-                    [{"user": {"id": cfg["approverId"]}, "body": cmd}],
+                    [{"user": {"id": cfg["approverId"]}, "body": cmd, "edited": False}],
                 )
                 tick_brand("eden", cfg, store, now, api, issues, DemoWriter())
                 tick_brand("eden", cfg, store, now, api, issues, DemoWriter())
                 self.assertEqual(api.post.call_count, 14)
+                self.assertEqual(recheck.call_count, 7)  # once per photo day, before its submissions
+                self.assertIn("“@stayeden”", preview(record["batch"]))
 
     def test_handoff_persists_for_followup_in_same_dm_thread(self):
-        with tempfile.TemporaryDirectory() as tmp, State(Path(tmp)) as store:
-            now = datetime(2026, 11, 30, 12, tzinfo=CT)
-            api, issues = Mock(), Mock()
-            issues.ensure.return_value = 1
-            issues.open.return_value = True
-            store.data["inboxSince"]["eden"] = (now - timedelta(minutes=15)).isoformat()
+        def run(handoff_open):
+            with tempfile.TemporaryDirectory() as tmp, State(Path(tmp)) as store:
+                now = datetime(2026, 11, 30, 12, tzinfo=CT)
+                api, issues, writer = Mock(), Mock(), Mock()
+                issues.ensure.return_value = 1
+                issues.open.return_value = handoff_open
+                # A reply that passes validation, so only the open handoff can stop the send.
+                writer.generate.return_value = "Happy to help! " + BOOKING
+                api.post.return_value = {"id": "sent"}
+                store.data["inboxSince"]["eden"] = (now - timedelta(minutes=15)).isoformat()
 
-            def message(mid, text, stamp):
-                return dict(
-                    id=mid,
-                    conversationId="thread",
-                    senderId="test",
-                    platform="instagram",
-                    direction="incoming",
-                    status="delivered",
-                    text=text,
-                    createdAt=stamp.isoformat(),
-                )
+                def message(mid, text, stamp):
+                    return dict(
+                        id=mid,
+                        conversationId="thread",
+                        senderId="test",
+                        platform="instagram",
+                        direction="incoming",
+                        status="delivered",
+                        text=text,
+                        createdAt=stamp.isoformat(),
+                    )
 
-            msg = message("first", "Refund?", now)
-            api.get.side_effect = lambda path, **params: {"items": [msg] if path == "/messages" else []}
-            process_inbox("eden", {"instagram": {"accountId": "a"}}, store, now, api, issues, Mock())
-            now += timedelta(minutes=15)
-            msg = message("second", "How do I book?", now)
-            process_inbox("eden", {"instagram": {"accountId": "a"}}, store, now, api, issues, Mock())
-            api.post.assert_not_called()
+                msg = message("first", "Refund?", now)
+                api.get.side_effect = lambda path, **params: {"items": [msg] if path == "/messages" else []}
+                target = {"instagram": {"accountId": "a"}}
+                process_inbox("eden", target, store, now, api, issues, writer, BUDGET)
+                writer.generate.assert_not_called()
+                now += timedelta(minutes=15)
+                msg = message("second", "How do I book?", now)
+                process_inbox("eden", target, store, now, api, issues, writer, BUDGET)
+                return api, writer
+
+        api, writer = run(handoff_open=False)  # control: Hank closed the handoff, the thread is released
+        api.post.assert_called_once()
+        api, writer = run(handoff_open=True)
+        api.post.assert_not_called()
+        writer.generate.assert_not_called()

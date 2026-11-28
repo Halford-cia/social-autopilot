@@ -11,7 +11,7 @@ from urllib.parse import urlencode, urlsplit
 from PIL import Image, ImageOps
 
 from .api import RemoteError, request
-from .sources import git_bytes
+from .sources import blob_sha, git_bytes
 
 FLAGS = (
     "face",
@@ -167,7 +167,37 @@ Use observation of the attached photo to decide. An example is never evidence ab
         return None
 
 
-def sanitize(data, brand, inspect=visual_check):
+def face_free(jpeg):
+    """A second, independent screen of the exact bytes that would leave the Mini.
+
+    Apple's on-device face and person detectors do not share the language model's blind spots
+    (a small framed portrait cleared by the model is found here). Any failure holds the photo.
+    """
+    try:
+        import Vision
+        from Foundation import NSData
+
+        handler = Vision.VNImageRequestHandler.alloc().initWithData_options_(
+            NSData.dataWithBytes_length_(jpeg, len(jpeg)), None
+        )
+        requests = [
+            Vision.VNDetectFaceRectanglesRequest.alloc().init(),
+            Vision.VNDetectHumanRectanglesRequest.alloc().init(),
+        ]
+        ok, error = handler.performRequests_error_(requests, None)
+        if ok is not True or error is not None:
+            return False
+        for req in requests:
+            found = req.results()
+            if found is None or len(found) != 0:
+                return False
+        return True
+    except Exception:  # noqa: BLE001 - an unavailable or failing detector never clears a photo
+        return False
+
+
+def sanitize(data, brand, inspect=visual_check, faces=None):
+    faces = faces or face_free
     try:
         with warnings.catch_warnings(), Image.open(BytesIO(data)) as im:
             warnings.simplefilter("error", Image.DecompressionBombWarning)
@@ -210,7 +240,11 @@ def sanitize(data, brand, inspect=visual_check):
             export.thumbnail((1080, 1350))
             cleaned = BytesIO()
             export.save(cleaned, "JPEG", quality=90, exif=b"", icc_profile=None)
-            return cleaned.getvalue()
+            final = cleaned.getvalue()
+            # Screen the final pixels themselves, independently of the model's answer above.
+            if faces(final) is not True:
+                return None
+            return final
     except (
         ValueError,
         TypeError,
@@ -223,13 +257,12 @@ def sanitize(data, brand, inspect=visual_check):
         return None
 
 
-def company_photos(key, fetch=request):
+CC = "https://api.companycam.com/v2"
+
+
+def companycam(key, fetch):
     def page(path, **query):
-        return fetch(
-            "GET",
-            "https://api.companycam.com/v2" + path + "?" + urlencode(query),
-            {"Authorization": "Bearer " + key},
-        )
+        return fetch("GET", CC + path + ("?" + urlencode(query) if query else ""), {"Authorization": "Bearer " + key})
 
     def rows(path, **filters):
         n = 1
@@ -240,6 +273,16 @@ def company_photos(key, fetch=request):
                 break
             n += 1
 
+    return page, rows
+
+
+def photo_version(photo):
+    """CompanyCam's own change stamp plus the MD5 of the image file."""
+    return f"{photo.get('updated_at')}/{photo.get('hash')}"
+
+
+def company_photos(key, fetch=request, *, sources=False):
+    _, rows = companycam(key, fetch)
     tags = {tag_value(t): t["id"] for t in rows("/tags")}
     if not {"after", "drone"} <= tags.keys():
         return
@@ -249,26 +292,65 @@ def company_photos(key, fetch=request):
             continue
         photo["tags"] = list(rows("/photos/" + photo_id + "/tags"))
         if url := candidate_url(photo):
-            yield url
+            # The source ID and version stay in the private ledger, never in the preview.
+            yield (url, {"kind": "companycam", "id": photo_id, "version": photo_version(photo)}) if sources else url
+
+
+def recheck_company(source, key, fetch=request):
+    """Before each submission: is the photo still tagged, public, active and unchanged?
+
+    "held" means withdrawn or changed (a replacement needs a new preview). "retry" means
+    CompanyCam could not answer now; nothing is submitted this cycle.
+    """
+    photo_id = str(source.get("id", ""))
+    if source.get("kind") != "companycam" or not photo_id.isdecimal():
+        return "held"
+    page, rows = companycam(key, fetch)
+    try:
+        photo = page("/photos/" + photo_id)
+        if not isinstance(photo, dict):
+            return "retry"
+        photo = dict(photo, tags=list(rows("/photos/" + photo_id + "/tags")))
+    except RemoteError as exc:
+        return "held" if exc.status in (404, 410) else "retry"
+    except (KeyError, TypeError, ValueError):
+        return "retry"
+    if str(photo.get("id")) != photo_id or photo_version(photo) != source.get("version"):
+        return "held"
+    return "ok" if candidate_url(photo) else "held"
+
+
+def recheck_repo(source, repo):
+    """The Stay Eden file must still be on origin/main with the same blob."""
+    if source.get("kind") != "repo" or not str(source.get("path", "")).startswith("public/images/"):
+        return "held"
+    data = git_bytes(repo, source["path"], missing_ok=True)
+    return "ok" if data is not None and blob_sha(data) == source.get("blob") else "held"
 
 
 def media_picker(brand, config, api, company_key=None):
-    photos = company_photos(company_key) if brand == "acacia" else None
+    photos = company_photos(company_key, sources=True) if brand == "acacia" else None
 
     def pick(source):
         if photos is not None:
-            for url in photos:
+            for url, origin in photos:
                 try:
                     data = request("GET", url, raw=True)
                 except RemoteError:
                     continue
                 if safe := sanitize(data, brand):
-                    return api.upload(safe)
+                    return {"url": api.upload(safe), "source": origin}
         else:
             for i in (2, 3, 4, 1):
-                data = git_bytes(config["edenRepo"], f"public/images/{source}-{i}.webp")
+                path = f"public/images/{source}-{i}.webp"
+                data = git_bytes(config["edenRepo"], path, missing_ok=True)
+                if data is None:
+                    continue  # an unavailable candidate; repository failures still raise
                 if safe := sanitize(data, brand):
-                    return api.upload(safe)
+                    return {
+                        "url": api.upload(safe),
+                        "source": {"kind": "repo", "path": path, "blob": blob_sha(data)},
+                    }
         return None
 
     return pick

@@ -21,7 +21,7 @@ class Boundaries(unittest.TestCase):
             issues.ensure.return_value = 1
             issues.read.return_value = "", []
             with (
-                patch("social.runtime.check_destinations"),
+                patch("social.runtime.check_destinations", return_value=({}, [])),
                 patch("social.runtime.check"),
                 patch("social.runtime.media_picker", return_value=lambda _: None),
             ):
@@ -37,7 +37,7 @@ class Boundaries(unittest.TestCase):
             api.get.return_value = {"items": []}
             issues.ensure.return_value = 1
             with (
-                patch("social.runtime.check_destinations"),
+                patch("social.runtime.check_destinations", return_value=({}, [])),
                 patch("social.runtime.check"),
                 patch("social.runtime.media_picker", side_effect=RuntimeError("media unavailable")),
             ):

@@ -15,7 +15,10 @@ TIMES = {
 ANCHOR = date(2026, 11, 30)
 
 
-def plan(brand, start, media, targets=None, *, compose=None):
+LABELS = {"instagram": "Instagram", "facebook": "Facebook Page", "googlebusiness": "Google Business Profile"}
+
+
+def plan(brand, start, media, targets=None, *, compose=None, destinations=None):
     if start.weekday() != 0 or brand not in CARDS:
         raise ValueError("Expected a brand and a Monday in Central Time")
     cards = [((start - ANCHOR).days + i) % len(CARDS[brand]) for i in range(7)]
@@ -29,7 +32,9 @@ def plan(brand, start, media, targets=None, *, compose=None):
         day = start + timedelta(days=i)
         card, text = cards[i], texts[i]
         source = CARDS[brand][card][0]
-        url = media(source)
+        picked = media(source)
+        # A picker returns the hosted URL plus a private source reference for the pre-send recheck.
+        url, origin = (picked["url"], picked["source"]) if isinstance(picked, dict) else (picked, None)
         platforms = (["instagram"] if url else []) + ["facebook"]
         if brand == "acacia":
             platforms.append("googlebusiness")
@@ -38,11 +43,15 @@ def plan(brand, start, media, targets=None, *, compose=None):
                 card=card,
                 text=text,
                 media=url,
+                source=origin,
                 platforms=platforms,
                 time=datetime.combine(day, time(*TIMES[brand][i]), CT).isoformat(),
             )
         )
-    return dict(brand=brand, week=start.isoformat(), targets=targets or {}, days=days)
+    batch = dict(brand=brand, week=start.isoformat(), targets=targets or {}, days=days)
+    if destinations is not None:
+        batch["destinations"] = dict(destinations)
+    return batch
 
 
 def verify_copy(batch):
@@ -77,6 +86,23 @@ def preview(batch):
         "Central Time. Each row is one feed post per listed destination. Tap a photo to inspect it.",
         "",
     ]
+    if "destinations" in batch:
+        # The names Blotato reports for the configured IDs, so a swapped account shows here.
+        names = batch["destinations"]
+        lines += [
+            "**Destinations (as Blotato reports them)**",
+            "",
+            *[
+                f"- {LABELS[p]}: " + (f"“{names[p]}”" if names.get(p) else "not verified, held")
+                for p in LABELS
+                if p in batch["targets"]
+            ],
+            "",
+            "Approving also confirms these are this brand’s accounts. The inbox for these accounts "
+            + ("(automatic replies included) " if batch["brand"] == "eden" else "")
+            + "starts only after that.",
+            "",
+        ]
     for d in batch["days"]:
         stamp = datetime.fromisoformat(d["time"]).strftime("%a %I:%M %p")
         media = f"[Photo]({d['media']})" if d["media"] else "Instagram held · no cleared photo"
