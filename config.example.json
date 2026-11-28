@@ -1,0 +1,46 @@
+{
+  "approverId": 0,
+  "operationsRepo": "<owner>/<private-operations-repo>",
+  "brief": "~/reports/queue-2026-11-07/STR-BRIEF.md",
+  "acaciaRepo": "~/acacia-roofing-systems",
+  "edenRepo": "~/str/abenteuer-stays",
+  "brands": {
+    "acacia": {
+      "autoPublish": false,
+      "targets": {
+        "instagram": {
+          "accountId": "<acacia-instagram>"
+        },
+        "facebook": {
+          "accountId": "<facebook-login>",
+          "pageId": "<acacia-page>"
+        },
+        "googlebusiness": {
+          "accountId": "<google-login>",
+          "locationId": "<accounts/.../locations/...>"
+        }
+      }
+    },
+    "eden": {
+      "autoPublish": false,
+      "targets": {
+        "instagram": {
+          "accountId": "<eden-instagram>"
+        },
+        "facebook": {
+          "accountId": "<facebook-login>",
+          "pageId": "<eden-page>"
+        }
+      }
+    }
+  },
+  "blotato": {
+    "contactChargeLimitCents": 200,
+    "contactChargeCents": 2,
+    "billingPeriodDay": 1
+  },
+  "claude": {
+    "monthlySpendLimitCents": 1000,
+    "maxTokensPerRun": 16000
+  }
+}
