@@ -280,16 +280,18 @@ def handoffs_closed_at(issues, linked):
         return None
 
 
-def after_resolution(api, platform, dest, item, closed):
+def after_resolution(api, platform, dest, item, closed, now):
     """The host's closed handoff cleared this conversation up to its close time, and nothing more.
 
     True only when this message arrived after that close and Blotato's history of the conversation
     holds nothing else after it: no later guest message and no later host message (Blotato lists the
     host's own messages as `outgoing`). A host who writes again after closing the handoff is still
     working the conversation, so a guest's next question stays with the host. A read error also does.
+    The history proves that only while Blotato still keeps every message since the close: a close
+    older than the retained window (45 days, less a day of margin) leaves the question with the host.
     """
     try:
-        if datetime.fromisoformat(item["createdAt"]) <= closed:
+        if closed < now - RETAINED or datetime.fromisoformat(item["createdAt"]) <= closed:
             return False
         found = False
         for row in pages(
@@ -369,6 +371,38 @@ def thread_replies(api, platform, dest, item):
             if row.get("id") != item["id"]:
                 return True
         return False
+    except (RemoteError, KeyError, TypeError, ValueError):
+        return True
+
+
+def author_key(brand, platform, item):
+    """One guest on one post: every top-level comment they leave there shares their handoffs."""
+    return event_ref(brand, platform + "/comments/author", f"{item.get('postId')}/{item.get('authorId')}")
+
+
+def same_author_handed_off(api, brand, platform, dest, item, holds, events, issues):
+    """Whether this guest already has an open handoff on this post, under any of their comments.
+
+    Returns the open handoff's issue number, True when that cannot be ruled out (no author or post
+    ID, or the post's comments cannot be read), or None. Handoffs opened from now on are linked to
+    the guest and post directly. For one opened before that link existed, the post's comments are
+    read (Blotato filters comments by `postId` and reports each one's `authorId`) and each of the
+    guest's other comments is looked up in the event ledger.
+    """
+    who, post = item.get("authorId"), item.get("postId")
+    if not who or not post:
+        return True
+    owner = next((n for n in linked_handoffs(holds, author_key(brand, platform, item)) if issues.open(n)), None)
+    if owner is not None:
+        return owner
+    try:
+        for row in pages(api.get, "/comments", postId=post, platform=platform, accountId=dest["accountId"], limit=250):
+            if row.get("id") == item["id"] or row.get("authorId") != who:
+                continue
+            earlier = events.get(event_ref(brand, "comments", row["id"])) or {}
+            if earlier.get("status") == "human" and earlier.get("issue") is not None and issues.open(earlier["issue"]):
+                return earlier["issue"]
+        return None
     except (RemoteError, KeyError, TypeError, ValueError):
         return True
 
@@ -463,6 +497,13 @@ def process_inbox(brand, targets, store, now, api, issues, writer, contact_limit
                     thread_key = event_ref(brand, platform + "/comments", root)
                     if action == "send":
                         owner = next((n for n in linked_handoffs(holds, thread_key) if issues.open(n)), None)
+                        if owner is None:
+                            # The same guest's open handoff under another top-level comment on this post.
+                            owner = same_author_handed_off(
+                                api, brand, platform, dest, item, holds, state["events"], issues
+                            )
+                            if owner is True:  # could not be ruled out: a new handoff, no reply
+                                owner, action, payload = None, "human", None
                         if owner is not None:
                             # Someone in this thread was already handed to the host.
                             state["events"][ref] = {
@@ -475,7 +516,7 @@ def process_inbox(brand, targets, store, now, api, issues, writer, contact_limit
                             }
                             store.save()
                             continue
-                        if thread_replies(api, platform, dest, item):
+                        if action == "send" and thread_replies(api, platform, dest, item):
                             action, payload = "human", None
                 if kind == "messages" and item.get("conversationId"):
                     thread_key = event_ref(brand, platform, item["conversationId"])
@@ -502,7 +543,7 @@ def process_inbox(brand, targets, store, now, api, issues, writer, contact_limit
                         # Hank closed every handoff in this thread. That clears the history up to his
                         # close, not anything the host or guest wrote after it.
                         closed = handoffs_closed_at(issues, linked)
-                        if closed is None or not after_resolution(api, platform, dest, item, closed):
+                        if closed is None or not after_resolution(api, platform, dest, item, closed, now):
                             action, payload = "human", None
                     elif not fresh_conversation(api, platform, dest, item, activated, now):
                         # The conversation may hold an open service request from before Blotato
@@ -545,9 +586,12 @@ def process_inbox(brand, targets, store, now, api, issues, writer, contact_limit
                         body += "\n\nSuggested draft: " + payload
                     record["issue"] = notice(issues, BRANDS[brand] + " · inbox " + ref, body)
                     record["status"] = "human"
-                    if thread_key:
-                        linked = linked_handoffs(holds, thread_key)
-                        holds[thread_key] = linked + ([] if record["issue"] in linked else [record["issue"]])
+                    keys = [thread_key] if thread_key else []
+                    if kind == "comments" and item.get("authorId") and item.get("postId"):
+                        keys.append(author_key(brand, platform, item))
+                    for k in keys:
+                        linked = linked_handoffs(holds, k)
+                        holds[k] = linked + ([] if record["issue"] in linked else [record["issue"]])
                 else:
                     record["status"] = "uncertain"
                     state["events"][ref] = record
@@ -671,6 +715,7 @@ def weekly(brand, cfg, store, now, api, issues, writer, resolved=None):
     record_key = brand + "/" + start.isoformat()
     records = store.data["batches"]
     draft = records.get(record_key, {})
+    drafting = None
     if "batch" not in draft:
 
         def compose(brand, week, cards):
@@ -680,10 +725,17 @@ def weekly(brand, cfg, store, now, api, issues, writer, resolved=None):
                 store.save()
             return draft["captions"]
 
-        pick = media_picker(brand, cfg, api, secret("COMPANYCAM_API_KEY") if brand == "acacia" else None)
-        batch = plan(brand, start, pick, targets, compose=compose, destinations=resolved)
-        records[record_key] = {"batch": batch}
-        store.save()
+        try:
+            pick = media_picker(brand, cfg, api, secret("COMPANYCAM_API_KEY") if brand == "acacia" else None)
+            batch = plan(brand, start, pick, targets, compose=compose, destinations=resolved)
+            records[record_key] = {"batch": batch}
+            store.save()
+        except RunLimit:
+            raise  # the shared Claude budget stop ends the whole cycle, as configured
+        except (RuntimeError, ValueError, KeyError, OSError, subprocess.SubprocessError) as exc:
+            # Preparing next week failed (Claude, media or a key). The week already approved still
+            # goes through its usual checks below; the failure is raised after, for its notice.
+            drafting = exc
     # On Sunday an approval for the outgoing week's remaining slots also counts.
     for week in dict.fromkeys([monday, start]):
         record = records.get(brand + "/" + week.isoformat())
@@ -691,6 +743,8 @@ def weekly(brand, cfg, store, now, api, issues, writer, resolved=None):
             continue
         for batch, holder, title in previews(brand, week.isoformat(), record, targets, resolved, store, issues):
             publish_preview(brand, cfg, store, now, api, issues, batch, holder, title, resolved)
+    if drafting is not None:
+        raise drafting
 
 
 def earlier_render(record, issues, store):
@@ -791,20 +845,79 @@ def publish_preview(brand, cfg, store, now, api, issues, batch, record, title, r
         )
 
 
-def digest_targets(brand, store, week):
-    """The destinations each feed posted to, with the time each took effect, independent of this
-    cycle's lookups and of the current config.
+# Write statuses that mean the Mini submitted the row to Blotato (held and expired rows never left).
+SUBMITTED = ("uncertain", "accepted", "scheduled", "published", "failed", "unresolved")
 
-    Only destinations Hank confirmed by approving a preview count: an automatic week posts only to
-    those, and a preview nobody approved (a replacement included) adds nothing. A ledger from before
-    this history was kept counts the destination Hank last confirmed for the whole week.
+
+def delivered(brand, store, week):
+    """Per feed, the destinations the Mini submitted this week's rows to, in slot order.
+
+    Each write names the token of the preview it went out under, and the week's saved previews (the
+    original and its replacement) carry each feed's destination with its IDs. Only an approved
+    preview, or an automatic week to the confirmed destinations, ever submits, so this is what Hank
+    confirmed, as delivered. Returns ({platform: [(due, destination)]}, {platform with a submitted
+    row whose destination cannot be recovered}).
     """
+    record = store.data["batches"].get(brand + "/" + week) or {}
+    known = {}
+    for holder in (record, record.get("replacement") or {}):
+        batch = holder.get("batch")
+        if isinstance(batch, dict):
+            known[identity(batch)] = batch
+    lo, hi = bounds(week)
+    found, unknown = {}, set()
+    for key, row in store.data["writes"].items():
+        parts = key.split("/")
+        if len(parts) != 3 or parts[0] != brand or row.get("status") not in SUBMITTED:
+            continue
+        platform = parts[2]
+        try:
+            due = datetime.fromisoformat(row["due"])
+        except (KeyError, TypeError, ValueError):
+            if lo.date().isoformat() <= parts[1] < hi.date().isoformat():
+                unknown.add(platform)
+            continue
+        if not lo <= due < hi:
+            continue
+        dest = ((known.get(row.get("batch")) or {}).get("destinations") or {}).get(platform)
+        if isinstance(dest, dict) and dest.get("accountId"):
+            found.setdefault(platform, []).append((due, dest))
+        else:
+            unknown.add(platform)
+    for rows in found.values():
+        rows.sort(key=lambda r: r[0])
+    return found, unknown
+
+
+def same_destination(a, b):
+    return all(a.get(k) == b.get(k) for k in ("accountId", "pageId", "locationId"))
+
+
+def digest_targets(brand, store, week):
+    """The destinations each feed posted to that week, with the time each took effect, independent
+    of this cycle's lookups and of the current config. Returns (targets, unclear feeds).
+
+    The week's own delivery evidence comes first: a feed that moved to a corrected Page midweek
+    counts the first Page up to the first slot sent to the second. This also covers ledgers written
+    before the confirmation history was kept, and a later confirmation that starts that history.
+    A feed with no submitted row that week falls back to the confirmation history, then to the
+    destination Hank last confirmed. Only destinations Hank confirmed by approving a preview count:
+    a preview nobody approved (a replacement included) submits nothing and adds nothing. A feed
+    with a submitted row whose destination cannot be recovered is reported as unclear (partial).
+    """
+    sent, unclear = delivered(brand, store, week)
     history = store.data.get("destinationHistory", {}).get(brand, {})
     out = {p: list(h) for p, h in history.items() if h}
     for p, d in store.data.get("approvedDestinations", {}).get(brand, {}).items():
         if p not in out and isinstance(d, dict):
             out[p] = [{"since": None, "destination": d}]
-    return out
+    for p, rows in sent.items():
+        entries = []
+        for due, dest in rows:
+            if not entries or not same_destination(entries[-1]["destination"], dest):
+                entries.append({"since": due.isoformat() if entries else None, "destination": dest})
+        out[p] = entries
+    return out, unclear
 
 
 MEASURED = ("instagram", "facebook")
@@ -818,7 +931,7 @@ def monday_digest(brand, store, now, api, issues):
     previous = (local - timedelta(days=local.weekday() + 7)).isoformat()
     digest_key = brand + "/" + previous
     if digest_key not in store.data["digests"]:
-        targets = digest_targets(brand, store, previous)
+        targets, unclear = digest_targets(brand, store, previous)
         missing = [p for p in MEASURED if p not in targets]
         if missing and local.weekday() < 6:
             return
@@ -836,6 +949,14 @@ def monday_digest(brand, store, now, api, issues):
                 "\n\nPartial: not measured: "
                 + ", ".join(LABELS[p] for p in missing)
                 + ". No preview named it that week and it was not confirmed by Sunday."
+            )
+        unclear = [p for p in MEASURED if p in unclear]
+        if unclear:
+            report += (
+                "\n\nPartial: "
+                + ", ".join(LABELS[p] for p in unclear)
+                + ": the destination of some posts the Mini submitted that week could not be recovered from "
+                "the saved previews, so those posts may be missing from the totals above."
             )
         store.data["digests"][digest_key] = notice(issues, BRANDS[brand] + " · digest " + previous, report)
         store.save()

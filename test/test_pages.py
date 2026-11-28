@@ -40,6 +40,7 @@ class FacebookPages(unittest.TestCase):
         comment = dict(
             id="comment",
             accountId="parent",
+            authorId="fixture-guest",  # Blotato reports the commenter; an unidentified one goes to the host
             isAuthor=False,
             platform="facebook",
             postId="post",

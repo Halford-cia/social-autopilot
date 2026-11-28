@@ -55,10 +55,11 @@ class AuthoringPath(unittest.TestCase):
             status="posted",
             createdAt=now.isoformat(),
         )
+        # Three different guests (Blotato reports each commenter's authorId).
         records = [
-            template | dict(id="1", text="Are you available on 12/20/2026?"),
-            template | dict(id="2", text="What time is check-in?"),
-            template | dict(id="3", text="Where are you located?"),
+            template | dict(id="1", authorId="guest-1", text="Are you available on 12/20/2026?"),
+            template | dict(id="2", authorId="guest-2", text="What time is check-in?"),
+            template | dict(id="3", authorId="guest-3", text="Where are you located?"),
         ]
         # The feed lists the three questions; none has a reply under it (Blotato's parentCommentId filter).
         self.api.get.side_effect = lambda path, **p: {

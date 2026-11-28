@@ -1,0 +1,536 @@
+{
+ "activated": {
+  "eden/facebook/fb/page": "2099-11-30T19:30:00-06:00",
+  "eden/facebook/fb/page2": "2099-12-01T12:15:00-06:00",
+  "eden/instagram/ig": "2099-11-30T19:30:00-06:00"
+ },
+ "appliedApprovals": {
+  "eden": [
+   "9fa368b025d42b6dca609fd1",
+   "b1f63c04542d4353ca6bd290"
+  ]
+ },
+ "approvals": {
+  "eden": [
+   "2099-11-30"
+  ]
+ },
+ "approvedDestinations": {
+  "eden": {
+   "facebook": {
+    "accountId": "fb",
+    "name": "Stay Eden",
+    "pageId": "page2"
+   },
+   "instagram": {
+    "accountId": "ig",
+    "name": "@stayeden_fredericksburgtx"
+   }
+  }
+ },
+ "batches": {
+  "eden/2099-11-30": {
+   "batch": {
+    "brand": "eden",
+    "days": [
+     {
+      "card": 7,
+      "media": "https://example.org/safe.jpg",
+      "platforms": [
+       "instagram",
+       "facebook"
+      ],
+      "source": {
+       "blob": "b",
+       "kind": "repo",
+       "path": "public/images/x-2.webp"
+      },
+      "text": "Which would you pick first, a night under canvas or a morning in the trees? Pecan Haven is a tent treehouse about ten feet up.",
+      "time": "2099-11-30T19:30:00-06:00"
+     },
+     {
+      "card": 8,
+      "media": "https://example.org/safe.jpg",
+      "platforms": [
+       "instagram",
+       "facebook"
+      ],
+      "source": {
+       "blob": "b",
+       "kind": "repo",
+       "path": "public/images/x-2.webp"
+      },
+      "text": "Cozy Tiny Home has room for two. What sounds better for the weekend, a chapter in the reading loft or a dip in the cowboy pool?",
+      "time": "2099-12-01T12:15:00-06:00"
+     },
+     {
+      "card": 9,
+      "media": "https://example.org/safe.jpg",
+      "platforms": [
+       "instagram",
+       "facebook"
+      ],
+      "source": {
+       "blob": "b",
+       "kind": "repo",
+       "path": "public/images/x-2.webp"
+      },
+      "text": "Start with a treetop outdoor shower. Save a soak in the private hot tub for later. Lunar Dome is a geodome for two.",
+      "time": "2099-12-02T12:15:00-06:00"
+     },
+     {
+      "card": 10,
+      "media": "https://example.org/safe.jpg",
+      "platforms": [
+       "instagram",
+       "facebook"
+      ],
+      "source": {
+       "blob": "b",
+       "kind": "repo",
+       "path": "public/images/x-2.webp"
+      },
+      "text": "Das Grun Haus is a two-bedroom cottage for up to six. Leave time for yard games.",
+      "time": "2099-12-03T19:30:00-06:00"
+     },
+     {
+      "card": 11,
+      "media": "https://example.org/safe.jpg",
+      "platforms": [
+       "instagram",
+       "facebook"
+      ],
+      "source": {
+       "blob": "b",
+       "kind": "repo",
+       "path": "public/images/x-2.webp"
+      },
+      "text": "Make room for a long soak and a suspended king bed. Treehouse Serenity Dome has room for two.",
+      "time": "2099-12-04T19:30:00-06:00"
+     },
+     {
+      "card": 12,
+      "media": "https://example.org/safe.jpg",
+      "platforms": [
+       "instagram",
+       "facebook"
+      ],
+      "source": {
+       "blob": "b",
+       "kind": "repo",
+       "path": "public/images/x-2.webp"
+      },
+      "text": "The Hidden Tavern has five bedrooms and a bunkroom. Which would you pick first, finding the speakeasy or a soak in one of two hot tubs?",
+      "time": "2099-12-05T09:30:00-06:00"
+     },
+     {
+      "card": 13,
+      "media": "https://example.org/safe.jpg",
+      "platforms": [
+       "instagram",
+       "facebook"
+      ],
+      "source": {
+       "blob": "b",
+       "kind": "repo",
+       "path": "public/images/x-2.webp"
+      },
+      "text": "What sounds better for the weekend, breakfast in the kitchen or coffee on the observation deck? Walnut Horizon sleeps four and has a full kitchen.",
+      "time": "2099-12-06T19:30:00-06:00"
+     }
+    ],
+    "destinations": {
+     "facebook": {
+      "accountId": "fb",
+      "name": "Stay Eden",
+      "pageId": "page"
+     },
+     "instagram": {
+      "accountId": "ig",
+      "name": "@stayeden_fredericksburgtx"
+     }
+    },
+    "targets": {
+     "facebook": {
+      "accountId": "fb",
+      "pageId": "page"
+     },
+     "instagram": {
+      "accountId": "ig"
+     }
+    },
+    "week": "2099-11-30"
+   },
+   "issue": 2,
+   "replacement": {
+    "batch": {
+     "brand": "eden",
+     "days": [
+      {
+       "card": 7,
+       "media": "https://example.org/safe.jpg",
+       "platforms": [
+        "facebook"
+       ],
+       "source": {
+        "blob": "b",
+        "kind": "repo",
+        "path": "public/images/x-2.webp"
+       },
+       "text": "Which would you pick first, a night under canvas or a morning in the trees? Pecan Haven is a tent treehouse about ten feet up.",
+       "time": "2099-11-30T19:30:00-06:00"
+      },
+      {
+       "card": 8,
+       "media": "https://example.org/safe.jpg",
+       "platforms": [
+        "facebook"
+       ],
+       "source": {
+        "blob": "b",
+        "kind": "repo",
+        "path": "public/images/x-2.webp"
+       },
+       "text": "Cozy Tiny Home has room for two. What sounds better for the weekend, a chapter in the reading loft or a dip in the cowboy pool?",
+       "time": "2099-12-01T12:15:00-06:00"
+      },
+      {
+       "card": 9,
+       "media": "https://example.org/safe.jpg",
+       "platforms": [
+        "facebook"
+       ],
+       "source": {
+        "blob": "b",
+        "kind": "repo",
+        "path": "public/images/x-2.webp"
+       },
+       "text": "Start with a treetop outdoor shower. Save a soak in the private hot tub for later. Lunar Dome is a geodome for two.",
+       "time": "2099-12-02T12:15:00-06:00"
+      },
+      {
+       "card": 10,
+       "media": "https://example.org/safe.jpg",
+       "platforms": [
+        "facebook"
+       ],
+       "source": {
+        "blob": "b",
+        "kind": "repo",
+        "path": "public/images/x-2.webp"
+       },
+       "text": "Das Grun Haus is a two-bedroom cottage for up to six. Leave time for yard games.",
+       "time": "2099-12-03T19:30:00-06:00"
+      },
+      {
+       "card": 11,
+       "media": "https://example.org/safe.jpg",
+       "platforms": [
+        "facebook"
+       ],
+       "source": {
+        "blob": "b",
+        "kind": "repo",
+        "path": "public/images/x-2.webp"
+       },
+       "text": "Make room for a long soak and a suspended king bed. Treehouse Serenity Dome has room for two.",
+       "time": "2099-12-04T19:30:00-06:00"
+      },
+      {
+       "card": 12,
+       "media": "https://example.org/safe.jpg",
+       "platforms": [
+        "facebook"
+       ],
+       "source": {
+        "blob": "b",
+        "kind": "repo",
+        "path": "public/images/x-2.webp"
+       },
+       "text": "The Hidden Tavern has five bedrooms and a bunkroom. Which would you pick first, finding the speakeasy or a soak in one of two hot tubs?",
+       "time": "2099-12-05T09:30:00-06:00"
+      },
+      {
+       "card": 13,
+       "media": "https://example.org/safe.jpg",
+       "platforms": [
+        "facebook"
+       ],
+       "source": {
+        "blob": "b",
+        "kind": "repo",
+        "path": "public/images/x-2.webp"
+       },
+       "text": "What sounds better for the weekend, breakfast in the kitchen or coffee on the observation deck? Walnut Horizon sleeps four and has a full kitchen.",
+       "time": "2099-12-06T19:30:00-06:00"
+      }
+     ],
+     "destinations": {
+      "facebook": {
+       "accountId": "fb",
+       "name": "Stay Eden",
+       "pageId": "page2"
+      }
+     },
+     "replaces": "9fa368b025d42b6dca609fd1",
+     "targets": {
+      "facebook": {
+       "accountId": "fb",
+       "pageId": "page2"
+      }
+     },
+     "week": "2099-11-30"
+    },
+    "issue": 5
+   }
+  },
+  "eden/2099-12-07": {
+   "batch": {
+    "brand": "eden",
+    "days": [
+     {
+      "card": 14,
+      "media": "https://example.org/safe.jpg",
+      "platforms": [
+       "instagram",
+       "facebook"
+      ],
+      "source": {
+       "blob": "b",
+       "kind": "repo",
+       "path": "public/images/x-2.webp"
+      },
+      "text": "Which would you pick first, a film on the projector or a dip in the cowboy pool? Cherry Cove is a canvas stay for two.",
+      "time": "2099-12-07T19:30:00-06:00"
+     },
+     {
+      "card": 15,
+      "media": "https://example.org/safe.jpg",
+      "platforms": [
+       "instagram",
+       "facebook"
+      ],
+      "source": {
+       "blob": "b",
+       "kind": "repo",
+       "path": "public/images/x-2.webp"
+      },
+      "text": "Lunar Dome is a geodome for two. What sounds better for the weekend, a treetop outdoor shower or a soak in the private hot tub?",
+      "time": "2099-12-08T12:15:00-06:00"
+     },
+     {
+      "card": 16,
+      "media": "https://example.org/safe.jpg",
+      "platforms": [
+       "instagram",
+       "facebook"
+      ],
+      "source": {
+       "blob": "b",
+       "kind": "repo",
+       "path": "public/images/x-2.webp"
+      },
+      "text": "Start with a chapter in the reading loft. Save a dip in the cowboy pool for later. Cozy Tiny Home has room for two.",
+      "time": "2099-12-09T12:15:00-06:00"
+     },
+     {
+      "card": 0,
+      "media": "https://example.org/safe.jpg",
+      "platforms": [
+       "instagram",
+       "facebook"
+      ],
+      "source": {
+       "blob": "b",
+       "kind": "repo",
+       "path": "public/images/x-2.webp"
+      },
+      "text": "Treehouse Serenity Dome has room for two. Leave time for a long soak.",
+      "time": "2099-12-10T19:30:00-06:00"
+     },
+     {
+      "card": 1,
+      "media": "https://example.org/safe.jpg",
+      "platforms": [
+       "instagram",
+       "facebook"
+      ],
+      "source": {
+       "blob": "b",
+       "kind": "repo",
+       "path": "public/images/x-2.webp"
+      },
+      "text": "Make room for a private hot tub and an outdoor shower. Cloud Dome sits on a wooded bluff and sleeps two.",
+      "time": "2099-12-11T19:30:00-06:00"
+     },
+     {
+      "card": 2,
+      "media": "https://example.org/safe.jpg",
+      "platforms": [
+       "instagram",
+       "facebook"
+      ],
+      "source": {
+       "blob": "b",
+       "kind": "repo",
+       "path": "public/images/x-2.webp"
+      },
+      "text": "Walnut Horizon sleeps four and has a full kitchen. Which would you pick first, breakfast in the kitchen or coffee on the observation deck?",
+      "time": "2099-12-12T09:30:00-06:00"
+     },
+     {
+      "card": 3,
+      "media": "https://example.org/safe.jpg",
+      "platforms": [
+       "instagram",
+       "facebook"
+      ],
+      "source": {
+       "blob": "b",
+       "kind": "repo",
+       "path": "public/images/x-2.webp"
+      },
+      "text": "What sounds better for the weekend, yard games or time at the fire pit? Das Grun Haus is a two-bedroom cottage for up to six.",
+      "time": "2099-12-13T19:30:00-06:00"
+     }
+    ],
+    "destinations": {
+     "facebook": {
+      "accountId": "fb",
+      "name": "Stay Eden",
+      "pageId": "page2"
+     },
+     "instagram": {
+      "accountId": "ig",
+      "name": "@stayeden_fredericksburgtx"
+     }
+    },
+    "targets": {
+     "facebook": {
+      "accountId": "fb",
+      "pageId": "page2"
+     },
+     "instagram": {
+      "accountId": "ig"
+     }
+    },
+    "week": "2099-12-07"
+   },
+   "issue": 14
+  }
+ },
+ "blotatoContacts": {
+  "2099-12-01": {
+   "contacts": [],
+   "reservedCents": 0
+  }
+ },
+ "digests": {
+  "eden/2099-11-16": 1,
+  "eden/2099-11-23": 3
+ },
+ "events": {},
+ "inboxSince": {
+  "eden/facebook/fb/page": "2099-11-30T19:30:00-06:00",
+  "eden/facebook/fb/page2": "2099-12-06T19:30:00-06:00",
+  "eden/instagram/ig": "2099-12-06T19:30:00-06:00"
+ },
+ "writes": {
+  "eden/2099-11-30/facebook": {
+   "batch": "9fa368b025d42b6dca609fd1",
+   "due": "2099-11-30T19:30:00-06:00",
+   "id": "s-2",
+   "issue": 7,
+   "status": "unresolved"
+  },
+  "eden/2099-11-30/instagram": {
+   "batch": "9fa368b025d42b6dca609fd1",
+   "due": "2099-11-30T19:30:00-06:00",
+   "id": "s-1",
+   "issue": 6,
+   "status": "unresolved"
+  },
+  "eden/2099-12-01/facebook": {
+   "batch": "b1f63c04542d4353ca6bd290",
+   "due": "2099-12-01T12:15:00-06:00",
+   "id": "s-4",
+   "issue": 9,
+   "status": "unresolved"
+  },
+  "eden/2099-12-01/instagram": {
+   "batch": "9fa368b025d42b6dca609fd1",
+   "due": "2099-12-01T12:15:00-06:00",
+   "id": "s-3",
+   "issue": 8,
+   "status": "unresolved"
+  },
+  "eden/2099-12-02/facebook": {
+   "batch": "b1f63c04542d4353ca6bd290",
+   "due": "2099-12-02T12:15:00-06:00",
+   "id": "s-6",
+   "issue": 11,
+   "status": "unresolved"
+  },
+  "eden/2099-12-02/instagram": {
+   "batch": "9fa368b025d42b6dca609fd1",
+   "due": "2099-12-02T12:15:00-06:00",
+   "id": "s-5",
+   "issue": 10,
+   "status": "unresolved"
+  },
+  "eden/2099-12-03/facebook": {
+   "batch": "b1f63c04542d4353ca6bd290",
+   "due": "2099-12-03T19:30:00-06:00",
+   "id": "s-8",
+   "issue": 13,
+   "status": "unresolved"
+  },
+  "eden/2099-12-03/instagram": {
+   "batch": "9fa368b025d42b6dca609fd1",
+   "due": "2099-12-03T19:30:00-06:00",
+   "id": "s-7",
+   "issue": 12,
+   "status": "unresolved"
+  },
+  "eden/2099-12-04/facebook": {
+   "batch": "b1f63c04542d4353ca6bd290",
+   "due": "2099-12-04T19:30:00-06:00",
+   "id": "s-10",
+   "issue": 16,
+   "status": "unresolved"
+  },
+  "eden/2099-12-04/instagram": {
+   "batch": "9fa368b025d42b6dca609fd1",
+   "due": "2099-12-04T19:30:00-06:00",
+   "id": "s-9",
+   "issue": 15,
+   "status": "unresolved"
+  },
+  "eden/2099-12-05/facebook": {
+   "batch": "b1f63c04542d4353ca6bd290",
+   "due": "2099-12-05T09:30:00-06:00",
+   "id": "s-12",
+   "issue": 18,
+   "status": "unresolved"
+  },
+  "eden/2099-12-05/instagram": {
+   "batch": "9fa368b025d42b6dca609fd1",
+   "due": "2099-12-05T09:30:00-06:00",
+   "id": "s-11",
+   "issue": 17,
+   "status": "unresolved"
+  },
+  "eden/2099-12-06/facebook": {
+   "batch": "b1f63c04542d4353ca6bd290",
+   "due": "2099-12-06T19:30:00-06:00",
+   "id": "s-14",
+   "status": "accepted"
+  },
+  "eden/2099-12-06/instagram": {
+   "batch": "9fa368b025d42b6dca609fd1",
+   "due": "2099-12-06T19:30:00-06:00",
+   "id": "s-13",
+   "status": "accepted"
+  }
+ }
+}

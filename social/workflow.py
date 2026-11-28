@@ -107,28 +107,38 @@ def publish(
     prior = set(w for w in state["approvals"].get(brand, []) if w < week)
     shown = batch.get("destinations") or {}
     confirmed = state.setdefault("approvedDestinations", {})
+    # The feeds this preview still owns. A feed whose configured destination changed belongs to its
+    # replacement preview: this one sends nothing there, and approving it confirms nothing there.
+    owned = [p for p in batch["targets"] if targets is None or targets.get(p) == batch["targets"][p]]
+    mine = {p: d for p, d in shown.items() if p in owned}
     if preview(batch) != issue_body:
         return
+    differs = set()
     if not approved:
         # A replacement preview promises a hold until its own approval, so autoPublish never sends it.
         if batch.get("replaces") or auto is not True or len(prior) < 2:
             return
-        # An automatic week only goes to the destinations Hank last confirmed on his phone. Only the
-        # feeds this preview still owns are compared: a feed whose configured destination changed
-        # belongs to its replacement preview, and this one sends nothing there.
-        owned = [p for p in batch["targets"] if targets is None or targets.get(p) == batch["targets"][p]]
-        if any(shown.get(p) != confirmed.get(brand, {}).get(p) for p in owned):
-            return "destinations"
+        # An automatic week only goes to the destinations Hank last confirmed on his phone, checked
+        # feed by feed: a feed the preview held (not verified when it was built) stays held as the
+        # preview says, a feed whose verified destination differs from the confirmation waits for an
+        # approval, and the brand's other feeds post.
+        differs = {p for p, d in mine.items() if d != confirmed.get(brand, {}).get(p)}
     applied = state.setdefault("appliedApprovals", {}).setdefault(brand, [])
     if approved and token not in applied:
         # Hank approves a batch. Each approval is applied once, so an older approved preview that is
         # still open never takes back a destination Hank confirmed later. Delivery failures and
         # expired slots have their own ledger.
         state["approvals"][brand] = sorted({*state["approvals"].get(brand, []), week})
-        if shown:
-            record_confirmation(state, brand, shown, now)
-            # A replacement preview confirms only the corrected destinations it names.
-            confirmed[brand] = {**confirmed.get(brand, {}), **shown} if batch.get("replaces") else dict(shown)
+        if mine:
+            record_confirmation(state, brand, mine, now)
+            before = confirmed.get(brand, {})
+            if batch.get("replaces"):
+                # A replacement preview confirms only the corrected destinations it names.
+                confirmed[brand] = {**before, **mine}
+            else:
+                # The feeds it owns take what it shows (a held feed is no longer confirmed); a feed
+                # that moved to a replacement keeps whatever that replacement's approval confirmed.
+                confirmed[brand] = {**{p: d for p, d in before.items() if p not in owned}, **mine}
         applied.append(token)
         save()
     writes = state["writes"]
@@ -141,6 +151,8 @@ def publish(
             target = batch["targets"].get(platform)
             if targets is not None and targets.get(platform) != target:
                 continue  # the configured destination changed: its replacement preview covers it
+            if platform in differs:
+                continue  # automatic week: this feed's destination is not the one Hank confirmed
             due = datetime.fromisoformat(day["time"])
             moment = max(now, clock()) if clock else now
             if moment - due > LATE_GRACE:
@@ -187,3 +199,5 @@ def publish(
                 elif result.get("scheduledTime") and datetime.fromisoformat(result["scheduledTime"]) == due:
                     writes[key]["status"] = "accepted"
             save()
+    if differs:
+        return "destinations"

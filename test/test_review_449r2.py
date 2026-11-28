@@ -162,10 +162,13 @@ class HeldDestination(unittest.TestCase):
             cfg["brands"]["eden"]["autoPublish"] = True
             cfg["brands"]["eden"]["targets"]["facebook"]["pageId"] = "page2"
             third = first + timedelta(days=15, hours=-6)  # Monday 6 a.m. of the third week
+            fb_sent = len(fb_posts(api))
             run.tick(third)
             run.tick(third + timedelta(hours=6))
             self.assertIn("eden/" + third.date().isoformat(), store.data["batches"])
-            self.assertEqual(api.post.call_count, sent)
+            # The Page whose ID changed gets nothing; the unchanged Instagram feed keeps posting (449r5 P1-1).
+            self.assertEqual(len(fb_posts(api)), fb_sent)
+            self.assertEqual(api.post.call_count - sent, 7)
             titles = [c.args[0] for c in run.issues.ensure.call_args_list]
             self.assertTrue(any("destinations changed" in t for t in titles))
 
